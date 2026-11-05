@@ -1,0 +1,159 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    background-color: #f8fafc;
+    color: #0f172a;
+  }
+
+  .dark body {
+    background-color: #090d16;
+    color: #f8fafc;
+  }
+
+  button,
+  select,
+  input[type="checkbox"],
+  input[type="radio"] {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  :focus-visible {
+    outline: 2px solid #004A8D;
+    outline-offset: 1px;
+  }
+
+  .dark :focus-visible {
+    outline-color: #38bdf8;
+  }
+}
+
+/* ============================================================================
+   SISTEMA TIPOGRÁFICO E DE COMPONENTES PADRONIZADO — MICROLINS
+   Hierarquia clara em 3 níveis:
+   1. Primário: Títulos e indicadores principais (alto contraste)
+   2. Secundário: Subtítulos, rótulos e dados de apoio
+   3. Auxiliar: Metadados, contadores e badges discretos
+   ============================================================================ */
+
+/* 1. Título Principal (Cabeçalho do Sistema): 15px / Bold */
+.typo-title-main {
+  font-size: 0.9375rem;
+  line-height: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+/* 2. Título de Seção / Modal / Métrica Principal: 14px / Bold */
+.typo-title-section {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* 3. Subtítulos e Cabeçalhos de Colunas: 12px / SemiBold */
+.typo-subtitle {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 600;
+}
+
+/* 4. Nome do Aluno no Card (Destaque Principal): 12.5px / Bold */
+.typo-card-title {
+  font-size: 0.78125rem;
+  line-height: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+/* 5. Corpo do Card (Curso, Aula, Contato): 11.5px / Medium */
+.typo-card-body {
+  font-size: 0.71875rem;
+  line-height: 1rem;
+  font-weight: 500;
+}
+
+/* 6. Metadados e Rótulos Secundários: 11px / Medium */
+.typo-meta {
+  font-size: 0.6875rem;
+  line-height: 0.9375rem;
+  font-weight: 500;
+}
+
+/* 7. Badges e Indicadores Compactos: 10.5px / SemiBold */
+.typo-badge {
+  font-size: 0.65625rem;
+  line-height: 0.875rem;
+  font-weight: 600;
+}
+
+/* 8. Botões e Ações Interativas: 11.5px / SemiBold */
+.typo-btn {
+  font-size: 0.71875rem;
+  line-height: 1rem;
+  font-weight: 600;
+}
+
+/* 9. Controles de Formulário e Filtros: 12px / Medium */
+.typo-control {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 500;
+}
+
+/* Barras de rolagem discretas e padronizadas */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.7);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.55);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.8);
+}
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+}

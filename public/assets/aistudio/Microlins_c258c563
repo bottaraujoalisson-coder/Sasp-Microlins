@@ -1,0 +1,574 @@
+﻿1. IDENTIFICAÇÃO DA SALA NOS CARDS
+
+
+Atualmente, o nome da sala não está sendo exibido corretamente nos cards.
+
+
+- Corrigir a identificação e apresentação da sala.
+- Verificar o caminho dos dados desde a integração com o Portal do Aluno até a exibição na interface.
+- Conferir o mapeamento do campo "Sala" recebido pela integração.
+- Garantir que a sala correta seja apresentada em cada card.
+- Quando a informação não estiver disponível, apresentar um texto discreto indicando que a sala não foi informada.
+- Não confundir sala com turma, horário ou unidade.
+
+
+Verificar especialmente "StudentPerformanceRecord", "src/data/microlinsData.ts" e os componentes responsáveis pela renderização dos cards.
+
+
+2. MODERNIZAÇÃO DO LAYOUT
+
+
+Reorganizar toda a interface para apresentar um visual moderno, limpo, profissional e intuitivo.
+
+
+Melhorar a distribuição de:
+
+
+- Cabeçalho.
+- Área de filtros.
+- Cards de resumo.
+- Kanbans.
+- Informações complementares.
+- Modais.
+- Rodapé.
+
+
+Requisitos:
+
+
+- Melhor aproveitamento do espaço horizontal em telas grandes.
+- Melhor distribuição dos elementos em telas pequenas.
+- Evitar espaços vazios desnecessários.
+- Evitar textos, indicadores e botões sobrepostos.
+- Padronizar margens, espaçamentos, fontes, tamanhos e alinhamentos.
+- Garantir que os cards tenham proporções adequadas.
+- Utilizar componentes visuais consistentes em todo o sistema.
+- Garantir uma navegação fluida e intuitiva.
+
+
+O layout deve ser totalmente responsivo.
+
+
+3. PADRONIZAÇÃO DAS INFORMAÇÕES DE LOGIN
+
+
+Revisar a apresentação das informações relacionadas ao login e padronizar sua exibição na interface.
+
+
+Manter uma apresentação visual consistente com o restante do sistema, evitando informações desalinhadas, repetidas ou com formatação diferente entre as telas.
+
+
+4. REORGANIZAÇÃO DOS CARDS DO NPS
+
+
+Os cards do Kanban NPS devem apresentar exclusivamente informações relacionadas ao convite NPS.
+
+
+Não exibir informações acadêmicas ou dados da aula, como:
+
+
+- Frequência.
+- Presença.
+- Faltas.
+- Sala.
+- Informações de desempenho escolar.
+- Outros dados que não pertençam ao convite NPS.
+
+
+Cada card NPS deve apresentar somente informações pertinentes ao convite, incluindo:
+
+
+- Nome do aluno, quando disponível.
+- Identificação do convite.
+- Data e horário do convite.
+- Status do convite.
+- Canal de origem.
+- Total de convites.
+- Identificação do canal de envio, como e-mail ou portal.
+
+
+Os indicadores de e-mail e portal devem permitir identificar claramente a origem dos convites.
+
+
+Detalhes do convite
+
+
+Ao clicar em Mais detalhes, abrir uma visualização específica do convite NPS.
+
+
+Essa visualização deve apresentar somente os dados relacionados ao convite, sem reutilizar o modal de detalhes acadêmicos do aluno.
+
+
+Criar, se necessário, um componente independente, como "NpsInvitationDetailModal".
+
+
+5. DEDUPLICAÇÃO DOS CONVITES NPS
+
+
+Revisar a lógica de identificação e deduplicação dos convites.
+
+
+Objetivos:
+
+
+- Evitar convites duplicados na listagem.
+- Não exibir o mesmo convite mais de uma vez.
+- Diferenciar convites distintos enviados ao mesmo aluno.
+- Utilizar o identificador original do convite, como "_id" ou "controlId", quando disponível.
+- Não eliminar convites diferentes apenas porque pertencem ao mesmo aluno ou contrato.
+
+
+Manter a lógica específica de identificação do convite mais recente para os indicadores NPS dos cards de alunos, quando aplicável.
+
+
+É importante separar a regra de deduplicação da listagem de convites da regra utilizada para os indicadores individuais dos alunos.
+
+
+6. FILTRO ANUAL DOS CONVITES NPS — PRIORIDADE
+
+
+A listagem de convites NPS deve contemplar o ano inteiro atual, de janeiro a dezembro.
+
+
+O período precisa ser calculado dinamicamente, sem utilizar datas fixas no código.
+
+
+Exemplo: se o ano atual for 2026, considerar o intervalo:
+
+
+- Início: 01/01/2026.
+- Final: 31/12/2026.
+
+
+O filtro anual deve ser aplicado antes da busca dos convites, e não somente depois que os dados forem recebidos.
+
+
+Implementar os seguintes pontos:
+
+
+1. Calcular automaticamente o início e o fim do ano atual.
+2. Aplicar o período na consulta à API da Indecx, utilizando os parâmetros de data disponíveis.
+3. Buscar todos os convites pertencentes ao período.
+4. Implementar paginação completa, caso a API retorne os resultados em páginas.
+5. Realizar uma segunda validação dos registros recebidos, considerando o campo "createdAt".
+6. Considerar o intervalo do início do ano atual até o início do próximo ano, sem incluir o primeiro instante do ano seguinte.
+7. Utilizar o fuso horário "America/Sao_Paulo" para determinar o ano vigente.
+8. Atualizar automaticamente o intervalo quando o ano mudar.
+9. Evitar que o cache apresente dados de um período diferente do selecionado.
+
+
+Atenção: não limitar a consulta aos últimos dias ou meses. O sistema precisa conseguir apresentar os convites de janeiro até dezembro do ano vigente.
+
+
+7. REVISÃO DOS FILTROS
+
+
+Revisar todos os filtros disponíveis no sistema.
+
+
+Garantir que:
+
+
+- Todos funcionem corretamente.
+- Os filtros sejam aplicados aos dados corretos.
+- A combinação de filtros funcione adequadamente.
+- A alteração de um filtro atualize os resultados.
+- Os filtros não apresentem resultados inconsistentes.
+- Os filtros tenham o mesmo padrão visual.
+- Seja possível limpar os filtros.
+- O estado dos filtros seja preservado durante as interações, quando apropriado.
+
+
+Novo filtro: dia da semana
+
+
+Retirar a informação do dia da semana dos cards e disponibilizá-la como filtro.
+
+
+O filtro deverá:
+
+
+- Apresentar os dias da semana.
+- Ter como padrão o dia atual.
+- Permitir selecionar outro dia.
+- Permitir consultar todos os dias, quando necessário.
+- Atualizar os registros exibidos conforme a seleção.
+
+
+O filtro deverá funcionar também na consulta dos dados de origem, e não apenas na filtragem visual dos registros já carregados.
+
+
+Considerar o mapeamento de dias utilizado pelo Portal do Aluno:
+
+
+- 1 — Segunda-feira.
+- 2 — Terça-feira.
+- 3 — Quarta-feira.
+- 4 — Quinta-feira.
+- 5 — Sexta-feira.
+- 6 — Sábado.
+- 7 — Domingo.
+
+
+Quando a opção de todos os dias estiver selecionada, consultar os dias necessários e reunir os resultados sem duplicações.
+
+
+8. FREQUÊNCIA NO KANBAN
+
+
+Substituir a nomenclatura Média por Frequência nos locais correspondentes do Kanban.
+
+
+A frequência deverá seguir a seguinte regra:
+
+
+- Abaixo de 85%: vermelho.
+- Igual ou acima de 85%: verde.
+
+
+Aplicar a mesma regra:
+
+
+- Nos cards individuais.
+- Nos cards de resumo.
+- Nos indicadores relacionados à frequência.
+
+
+Utilizar o cálculo de frequência baseado em presenças e faltas:
+
+
+"Frequência = (Presenças / (Presenças + Faltas)) × 100"
+
+
+Não considerar registros sem frequência definida como se fossem 0%.
+
+
+Quando não houver dados suficientes para calcular a frequência, apresentar uma indicação apropriada, como “Sem dados”.
+
+
+9. OTIMIZAÇÃO DOS CARDS DOS KANBANS
+
+
+Reorganizar os cards dos dois Kanbans para melhorar a leitura e o aproveitamento do espaço.
+
+
+- Reduzir excessos de espaçamento.
+- Melhorar a hierarquia visual das informações.
+- Destacar as informações mais importantes.
+- Evitar cards excessivamente altos.
+- Manter alinhamento entre os elementos.
+- Garantir boa visualização em telas menores.
+- Evitar que informações importantes sejam escondidas.
+- Padronizar a apresentação dos cards.
+
+
+Colunas finalizadas
+
+
+As colunas finalizadas deverão ter somente:
+
+
+- Borda verde.
+- Sombra verde discreta.
+
+
+Não utilizar cores fortes ou preenchimentos excessivos.
+
+
+10. FIXAÇÃO DA COLUNA DO HORÁRIO ATUAL
+
+
+Corrigir o comportamento de fixação das colunas nos dois Kanbans.
+
+
+Apenas a coluna correspondente ao horário atual deverá permanecer fixada.
+
+
+Regras:
+
+
+- Identificar dinamicamente o horário atual.
+- Fixar somente a coluna correspondente a esse horário.
+- Não fixar permanentemente a primeira coluna.
+- Não utilizar a posição do índice da coluna como critério.
+- Atualizar a fixação automaticamente quando o horário mudar.
+- Remover a fixação da coluna anterior quando o horário avançar.
+- Aplicar o mesmo comportamento no Kanban de aulas e no Kanban NPS.
+
+
+Verificar as funções relacionadas à identificação dos horários, como "isCurrentHour", "isPastHour", "isFutureHour", "groupByHourKanban" e "groupByNpsHourKanban".
+
+
+No Kanban NPS, utilizar o horário de criação do convite para a organização por horário, quando essa for a regra de agrupamento adotada.
+
+
+11. KANBAN NPS — RESUMO DAS COLUNAS
+
+
+Retirar o resumo exibido abaixo do horário nas colunas do Kanban NPS.
+
+
+Manter a apresentação mais limpa, exibindo somente as informações realmente necessárias.
+
+
+Não aplicar essa alteração aos resumos do Kanban de aulas quando eles forem necessários.
+
+
+12. MÓDULO DO ALUNO
+
+
+O módulo do aluno não está aparecendo corretamente.
+
+
+Investigar a causa e corrigir o problema.
+
+
+Verificar:
+
+
+- Renderização do módulo.
+- Navegação até o módulo.
+- Carregamento dos dados.
+- Integração entre a listagem e os detalhes do aluno.
+- Exibição dos componentes.
+- Responsividade.
+
+
+Garantir que o módulo volte a aparecer e funcione corretamente.
+
+
+13. INDICADOR NPS NOS CARDS DOS ALUNOS
+
+
+O indicador NPS exibido nos cards dos alunos deverá utilizar a cor roxa.
+
+
+Aplicar uma tonalidade roxa moderna, com boa legibilidade e contraste.
+
+
+Manter a padronização visual com os demais indicadores do sistema.
+
+
+14. REMOÇÃO DA OPÇÃO ENVIAR NPS
+
+
+Remover a opção Enviar NPS da interface.
+
+
+Retirar o botão, menu ou ação correspondente de todas as telas em que aparecer.
+
+
+Verificar se não existem referências visuais duplicadas à mesma funcionalidade.
+
+
+15. REMOÇÃO DOS EMOJIS
+
+
+Remover todos os emojis utilizados em todo o site.
+
+
+Substituir por ícones profissionais, preferencialmente utilizando a biblioteca "lucide-react", já presente no projeto.
+
+
+Padronizar:
+
+
+- Tamanho dos ícones.
+- Espessura dos traços.
+- Alinhamento.
+- Espaçamento.
+- Cores.
+
+
+Não utilizar emojis em títulos, botões, cards, filtros, indicadores, mensagens ou menus.
+
+
+16. CABEÇALHO E RODAPÉ
+
+
+Diferenciar visualmente o cabeçalho e o rodapé do restante da interface.
+
+
+Preferencialmente utilizar tons de azul inspirados na identidade visual da Microlins.
+
+
+Cabeçalho
+
+
+- Visual moderno.
+- Identidade visual consistente.
+- Melhor distribuição dos elementos.
+- Boa adaptação para dispositivos móveis.
+- Navegação clara.
+
+
+Rodapé
+
+
+Inserir exatamente os seguintes textos:
+
+
+© 2026 GRUPO REALIZAR MICROLINS. Todos os direitos reservados.
+
+
+Sistema desenvolvido por Alisson Araújo Bott.
+
+
+Para suporte técnico, entre em contato pelo WhatsApp: (18) 99743-2487.
+
+
+O telefone deverá ser apresentado de forma organizada e, se possível, com link clicável para iniciar uma conversa no WhatsApp.
+
+
+O rodapé deve ter boa legibilidade e não ocupar espaço excessivo.
+
+
+17. TRANSIÇÕES E NAVEGAÇÃO
+
+
+Implementar transições leves entre páginas, módulos e funcionalidades.
+
+
+Utilizar animações discretas e profissionais.
+
+
+Exemplos:
+
+
+- Transição suave ao trocar de módulo.
+- Animação leve ao abrir e fechar modais.
+- Transições discretas nos cards.
+- Feedback visual ao aplicar filtros.
+- Animação suave durante atualizações dos dados.
+
+
+Evitar animações exageradas ou que prejudiquem o desempenho.
+
+
+A experiência deverá ser rápida e fluida.
+
+
+18. ORGANIZAÇÃO TÉCNICA E COMPONENTES
+
+
+Analisar a estrutura existente e realizar as alterações nos locais apropriados.
+
+
+Considerar especialmente os arquivos e componentes já existentes:
+
+
+- "src/App.tsx"
+- "src/data/microlinsData.ts"
+- "src/utils/performanceAnalytics.ts"
+- "src/components/HourKanbanBoard.tsx"
+- "src/components/NpsHourKanbanBoard.tsx"
+- "src/components/StudentDetailModal.tsx"
+- "server.ts"
+
+
+Verificar também as funções relacionadas a:
+
+
+- "syncLivePortalRecords"
+- "syncActiveIndecxNpsInvitations"
+- "mapAndDeduplicateActiveInvitations"
+- "filterNpsRecords"
+- "groupByNpsHourKanban"
+- "computePerformanceKPIs"
+
+
+Esses caminhos são referências para investigação. Caso a estrutura atual tenha sido modificada, localizar os arquivos equivalentes antes de implementar.
+
+
+Separação dos dados
+
+
+Quando necessário, separar os modelos de dados acadêmicos dos modelos de convites NPS.
+
+
+O objetivo é evitar que os cards NPS recebam informações indevidas do módulo acadêmico.
+
+
+Criar tipos e componentes específicos quando isso melhorar a organização, a manutenção e a clareza do código.
+
+
+19. DESEMPENHO E ATUALIZAÇÃO DOS DADOS
+
+
+Revisar o comportamento de atualização dos dados e garantir que as melhorias não prejudiquem a performance.
+
+
+- Evitar consultas desnecessárias.
+- Evitar renderizações excessivas.
+- Preservar os mecanismos de cache que funcionam corretamente.
+- Garantir que os filtros sejam respeitados durante as atualizações.
+- Evitar duplicações após sincronizações.
+- Garantir que os dados apresentados correspondam aos filtros ativos.
+- Preservar o funcionamento das integrações existentes.
+
+
+20. CRITÉRIOS DE ACEITAÇÃO E TESTES
+
+
+Após implementar as melhorias, realizar uma revisão completa do sistema.
+
+
+Verificar os seguintes cenários:
+
+
+1. O nome da sala aparece corretamente nos cards dos alunos.
+2. O layout funciona em computadores, tablets e celulares.
+3. Os cards NPS apresentam somente informações dos convites.
+4. O botão “Mais detalhes” abre os detalhes corretos do convite.
+5. Convites diferentes do mesmo aluno continuam aparecendo individualmente.
+6. Convites duplicados não aparecem repetidamente.
+7. A listagem NPS considera todo o ano atual.
+8. O filtro anual é aplicado antes da busca dos convites.
+9. A paginação dos convites é processada corretamente.
+10. O filtro de dia da semana funciona e inicia no dia atual.
+11. A opção de todos os dias reúne os resultados corretamente.
+12. A frequência abaixo de 85% aparece em vermelho.
+13. A frequência igual ou superior a 85% aparece em verde.
+14. Os cards dos Kanbans apresentam boa distribuição visual.
+15. Somente a coluna do horário atual fica fixada.
+16. A fixação muda automaticamente quando o horário avança.
+17. O Kanban NPS não apresenta resumo abaixo do horário.
+18. O módulo do aluno aparece e funciona corretamente.
+19. O indicador NPS dos alunos aparece em roxo.
+20. A opção “Enviar NPS” não aparece mais.
+21. Não existem emojis na interface.
+22. O cabeçalho e o rodapé possuem identidade visual diferenciada.
+23. O rodapé apresenta os três textos solicitados.
+24. As transições entre módulos e modais funcionam corretamente.
+25. Os filtros continuam funcionando após as atualizações dos dados.
+
+
+Executar também os comandos disponíveis no projeto, como:
+
+
+- "npm run lint"
+- "npm run build"
+
+
+Corrigir erros encontrados e verificar se não foram introduzidos problemas em funcionalidades que já estavam funcionando.
+
+
+---
+
+
+21. ORIENTAÇÕES FINAIS
+
+
+- Implementar as melhorias diretamente no projeto existente.
+- Não entregar apenas sugestões ou exemplos.
+- Não substituir funcionalidades existentes sem necessidade.
+- Não remover recursos que não foram mencionados neste pedido.
+- Preservar a identidade visual da Microlins.
+- Priorizar uma interface moderna, limpa, profissional e responsiva.
+- Garantir que as alterações funcionem tanto no desktop quanto no mobile.
+- Verificar o funcionamento real das integrações e dos filtros.
+- Evitar soluções temporárias ou correções apenas visuais quando o problema estiver na origem dos dados.
+- Ao concluir, apresentar um resumo dos arquivos modificados, das funcionalidades corrigidas e dos testes realizados.
+
+
+RESULTADO ESPERADO: um sistema Microlins moderno, organizado, rápido, responsivo e funcional, com Kanbans bem distribuídos, informações corretas, filtros confiáveis e uma experiência de navegação agradável.

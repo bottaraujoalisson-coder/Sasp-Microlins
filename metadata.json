@@ -1,0 +1,6 @@
+{
+  "name": "Microlins — Painel de Desempenho & Exportação Acadêmica",
+  "description": "Painel analítico e exportador inteligente de dados de desempenho acadêmico, frequência e notas da unidade Microlins Presidente Prudente.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
