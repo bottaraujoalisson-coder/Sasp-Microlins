@@ -1,47 +1,54 @@
--- ============================================================================
--- SQL Schema Oficial, Índices, Relacionamentos e Políticas RLS para o Supabase
--- Projeto: Gestão Pedagógica e Acadêmica Microlins (hkonvuytinqlakerpara)
--- Execução 100% segura e idempotente (IF NOT EXISTS / sem comandos destrutivos)
--- ============================================================================
+-- =============================================================================
+-- SCHEMA OFICIAL E DEFINITIVO DO SUPABASE — ÚNICO BANCO DE DADOS DO SISTEMA
+-- Projeto: Gestão Pedagógica e Acadêmica Microlins (Supabase Sole Database + Supabase Auth)
+-- =============================================================================
 
--- 1. Tabela de Unidades Escolares (schools)
-CREATE TABLE IF NOT EXISTS schools (
+-- Este arquivo consolida a estrutura relacional normalizada, chaves estrangeiras,
+-- restrições de integridade, índices, funções RPC atômicas e políticas de RLS.
+-- Consulte também: /supabase/migrations/20261106000001_supabase_sole_database_and_auth.sql
+
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- 1. schools (Unidades Escolares)
+CREATE TABLE IF NOT EXISTS public.schools (
   id TEXT PRIMARY KEY,
-  nome TEXT NOT NULL,
+  nome TEXT NOT NULL CHECK (char_length(trim(nome)) > 0),
   cidade TEXT,
-  uf TEXT,
-  codigo_portal TEXT,
-  ativa BOOLEAN DEFAULT TRUE,
+  uf TEXT CHECK (uf IS NULL OR char_length(trim(uf)) <= 4),
+  codigo_portal TEXT NOT NULL DEFAULT '1875',
+  ativa BOOLEAN NOT NULL DEFAULT true,
   nps_email TEXT,
+  nps_password_enc TEXT,
   nps_company_filter TEXT,
-  nps_base_url TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT
+  nps_base_url TEXT NOT NULL DEFAULT 'https://v3.app-indecx.com',
+  nps_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 2. Tabela de Credenciais de Usuários e Colaboradores (users)
-CREATE TABLE IF NOT EXISTS users (
+-- 2. users (Usuários Administrados pelo Administrador — Vinculados ao Supabase Auth)
+CREATE TABLE IF NOT EXISTS public.users (
   id TEXT PRIMARY KEY,
-  school_id TEXT REFERENCES schools(id) ON DELETE CASCADE,
-  login TEXT NOT NULL UNIQUE,
-  senha TEXT NOT NULL,
-  portal_password TEXT,
-  nome_completo TEXT NOT NULL,
-  cargo TEXT NOT NULL,
-  escola_nome TEXT,
-  codigo_escola TEXT,
-  ativo BOOLEAN DEFAULT TRUE,
-  created_at TEXT NOT NULL,
-  ultimo_acesso TEXT
+  auth_user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE SET NULL,
+  school_id TEXT REFERENCES public.schools(id) ON DELETE CASCADE,
+  login TEXT NOT NULL UNIQUE CHECK (char_length(trim(login)) > 0),
+  email TEXT UNIQUE,
+  password_hash TEXT NOT NULL,
+  portal_password_enc TEXT,
+  nome_completo TEXT NOT NULL CHECK (char_length(trim(nome_completo)) > 0),
+  cargo TEXT NOT NULL DEFAULT 'Colaborador Pedagógico',
+  role TEXT NOT NULL DEFAULT 'ESCOLA' CHECK (role IN ('ADMIN', 'ESCOLA')),
+  ativo BOOLEAN NOT NULL DEFAULT true,
+  ultimo_acesso TIMESTAMPTZ,
+  created_by TEXT DEFAULT 'admin',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_users_school_id ON users(school_id);
-CREATE INDEX IF NOT EXISTS idx_users_login ON users(login);
-
--- 3. Tabela de Agendamentos e Frequência de Alunos (student_records)
-CREATE TABLE IF NOT EXISTS student_records (
+-- 3. student_records (Registros Acadêmicos de Alunos, Presenças, Faltas e Notas)
+CREATE TABLE IF NOT EXISTS public.student_records (
   id BIGINT PRIMARY KEY,
-  contrato TEXT,
+  contrato TEXT NOT NULL,
   aula_id TEXT,
   nome_completo TEXT NOT NULL,
   nome_curto TEXT,
@@ -53,158 +60,146 @@ CREATE TABLE IF NOT EXISTS student_records (
   formacao TEXT,
   curso TEXT,
   aula_info TEXT,
-  aula_numero INTEGER,
-  tipo_material TEXT,
-  possui_apostila BOOLEAN,
+  aula_numero INTEGER NOT NULL DEFAULT 0,
+  tipo_material TEXT DEFAULT 'Apostila',
+  possui_apostila BOOLEAN NOT NULL DEFAULT false,
   horario TEXT,
   hora_inicio TEXT,
   hora_fim TEXT,
   turno TEXT,
   sala TEXT,
-  modalidade TEXT,
+  modalidade TEXT DEFAULT 'Presencial',
   inicio TEXT,
   fim TEXT,
   nota NUMERIC,
   nota_id TEXT,
+  nota_aula_numero INTEGER,
   info_aula TEXT,
-  status TEXT,
+  status TEXT DEFAULT 'NÃO INICIADO',
   presenca_ou_falta TEXT,
-  status_sistema TEXT,
-  inadimplente BOOLEAN,
-  parcelas_atrasadas INTEGER,
-  nota_aula_numero NUMERIC,
+  inadimplente BOOLEAN NOT NULL DEFAULT false,
+  parcelas_atrasadas INTEGER NOT NULL DEFAULT 0,
   dia_semana TEXT,
-  semana_code TEXT,
   email TEXT,
   link_login_url TEXT,
-  cad_id TEXT,
-  cad_nome TEXT,
-  unidade TEXT,
-  municipio TEXT,
   educador TEXT,
-  educador_cached_at TEXT,
-  causa_falta_material_explicita TEXT
+  educador_cached_at TIMESTAMPTZ,
+  causa_falta_material_explicita TEXT,
+  school_id TEXT NOT NULL DEFAULT 'school-1875' REFERENCES public.schools(id) ON DELETE CASCADE,
+  escola_codigo TEXT NOT NULL DEFAULT '1875',
+  unidade TEXT NOT NULL DEFAULT 'ESCOLA PRESIDENTE PRUDENTE',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-ALTER TABLE student_records ADD COLUMN IF NOT EXISTS causa_falta_material_explicita TEXT;
+-- 4. student_educators (Vínculos Oficiais Contrato <-> Educador)
+CREATE TABLE IF NOT EXISTS public.student_educators (
+  school_id TEXT NOT NULL DEFAULT 'school-1875' REFERENCES public.schools(id) ON DELETE CASCADE,
+  contrato TEXT NOT NULL,
+  nome_aluno TEXT,
+  educador_nome TEXT NOT NULL,
+  escola_codigo TEXT NOT NULL DEFAULT '1875',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (school_id, contrato)
+);
 
-CREATE INDEX IF NOT EXISTS idx_student_records_contrato ON student_records(contrato);
-CREATE INDEX IF NOT EXISTS idx_student_records_dia_semana ON student_records(dia_semana);
-CREATE INDEX IF NOT EXISTS idx_student_records_unidade ON student_records(unidade);
-CREATE INDEX IF NOT EXISTS idx_student_records_educador ON student_records(educador);
-
--- 4. Tabela de Convites e Pesquisas NPS (nps_records)
-CREATE TABLE IF NOT EXISTS nps_records (
+-- 5. nps_records (Convites e Pesquisas NPS Anuais)
+CREATE TABLE IF NOT EXISTS public.nps_records (
   id TEXT PRIMARY KEY,
-  control_id TEXT,
+  control_id TEXT NOT NULL,
   student_name TEXT NOT NULL,
   contrato TEXT,
   codigo_pessoa TEXT,
   email TEXT,
-  email_anterior TEXT,
   phone TEXT,
   action_name TEXT,
   ponto_jornada TEXT,
   origem TEXT,
   channel TEXT,
   invitation_status TEXT,
-  answered BOOLEAN,
-  created_at TEXT,
-  sent_at TEXT,
-  answered_at TEXT,
-  attempts_count INTEGER,
-  survey_url TEXT,
-  priorizar_nps_no_login BOOLEAN DEFAULT FALSE,
+  answered BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ,
+  sent_at TIMESTAMPTZ,
+  answered_at TIMESTAMPTZ,
+  attempts_count INTEGER NOT NULL DEFAULT 1,
+  total_student_invitations INTEGER NOT NULL DEFAULT 1,
+  email_delivery_status TEXT,
+  email_delivery_events JSONB DEFAULT '[]'::jsonb,
+  email_last_event_at TIMESTAMPTZ,
+  email_bounce_reason TEXT,
+  survey_url TEXT DEFAULT '',
+  nps_destinatario TEXT,
+  nivel_cruzamento TEXT,
+  respondente_nome TEXT,
+  respondente_vinculo_label TEXT,
+  is_vinculo_familiar_ambiguo BOOLEAN NOT NULL DEFAULT false,
+  alunos_vinculados_familia JSONB DEFAULT '[]'::jsonb,
+  contratos_vinculados_familia JSONB DEFAULT '[]'::jsonb,
+  orientacao_abordagem_presencial TEXT,
+  priorizar_nps_no_login BOOLEAN NOT NULL DEFAULT false,
   ciclo_priorizado TEXT,
   priorizado_por TEXT,
-  priorizado_em TEXT,
-  nota_nps NUMERIC,
+  priorizado_em TIMESTAMPTZ,
+  nota_nps INTEGER,
   comentario_nps TEXT,
-  ultimo_reenvio_email_em TEXT,
-  ultimo_reenvio_email_por TEXT
+  ultimo_reenvio_email_em TIMESTAMPTZ,
+  ultimo_reenvio_email_por TEXT,
+  email_anterior TEXT,
+  school_id TEXT NOT NULL DEFAULT 'school-1875' REFERENCES public.schools(id) ON DELETE CASCADE,
+  escola_codigo TEXT NOT NULL DEFAULT '1875',
+  unidade TEXT NOT NULL DEFAULT 'ESCOLA PRESIDENTE PRUDENTE',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-ALTER TABLE nps_records ADD COLUMN IF NOT EXISTS email_anterior TEXT;
-ALTER TABLE nps_records ADD COLUMN IF NOT EXISTS priorizar_nps_no_login BOOLEAN DEFAULT FALSE;
-ALTER TABLE nps_records ADD COLUMN IF NOT EXISTS ciclo_priorizado TEXT;
-ALTER TABLE nps_records ADD COLUMN IF NOT EXISTS priorizado_por TEXT;
-ALTER TABLE nps_records ADD COLUMN IF NOT EXISTS priorizado_em TEXT;
-ALTER TABLE nps_records ADD COLUMN IF NOT EXISTS nota_nps NUMERIC;
-ALTER TABLE nps_records ADD COLUMN IF NOT EXISTS comentario_nps TEXT;
-ALTER TABLE nps_records ADD COLUMN IF NOT EXISTS ultimo_reenvio_email_em TEXT;
-ALTER TABLE nps_records ADD COLUMN IF NOT EXISTS ultimo_reenvio_email_por TEXT;
-
-CREATE INDEX IF NOT EXISTS idx_nps_records_contrato ON nps_records(contrato);
-CREATE INDEX IF NOT EXISTS idx_nps_records_control_id ON nps_records(control_id);
-CREATE INDEX IF NOT EXISTS idx_nps_records_invitation_status ON nps_records(invitation_status);
-CREATE INDEX IF NOT EXISTS idx_nps_records_priorizar_login ON nps_records(priorizar_nps_no_login);
-
--- 5. Tabela de Trilha de Auditoria de Segurança (audit_logs)
-CREATE TABLE IF NOT EXISTS audit_logs (
-  id SERIAL PRIMARY KEY,
-  timestamp TEXT NOT NULL,
+-- 6. audit_logs (Trilha de Auditoria Institucional)
+CREATE TABLE IF NOT EXISTS public.audit_logs (
+  id BIGSERIAL PRIMARY KEY,
+  timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
   actor_login TEXT NOT NULL,
   actor_role TEXT NOT NULL,
   action TEXT NOT NULL,
   resource TEXT NOT NULL,
-  status TEXT NOT NULL,
-  ip_address TEXT,
+  status TEXT NOT NULL DEFAULT 'SUCCESS',
+  ip_address TEXT DEFAULT '127.0.0.1',
   details TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_login ON audit_logs(actor_login);
+-- 7. sync_logs (Logs de Sincronização)
+CREATE TABLE IF NOT EXISTS public.sync_logs (
+  id BIGSERIAL PRIMARY KEY,
+  school_id TEXT NOT NULL DEFAULT 'school-1875' REFERENCES public.schools(id) ON DELETE CASCADE,
+  escola_codigo TEXT NOT NULL DEFAULT '1875',
+  sync_type TEXT NOT NULL,
+  weekday_code TEXT,
+  status TEXT NOT NULL DEFAULT 'SUCCESS',
+  records_received INTEGER NOT NULL DEFAULT 0,
+  records_inserted INTEGER NOT NULL DEFAULT 0,
+  records_updated INTEGER NOT NULL DEFAULT 0,
+  divergences_count INTEGER NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
--- 6. Tabela de Solicitações de Direitos do Titular — LGPD Art. 18 (lgpd_requests)
-CREATE TABLE IF NOT EXISTS lgpd_requests (
-  id SERIAL PRIMARY KEY,
-  protocol TEXT NOT NULL UNIQUE,
+-- 8. lgpd_requests (Solicitações de Direitos dos Titulares)
+CREATE TABLE IF NOT EXISTS public.lgpd_requests (
+  id TEXT PRIMARY KEY,
   requester_name TEXT NOT NULL,
   requester_email TEXT NOT NULL,
   requester_role TEXT NOT NULL,
   request_type TEXT NOT NULL,
-  description TEXT,
-  status TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  resolved_at TEXT
+  description TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'RECEBIDA',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ
 );
 
-CREATE INDEX IF NOT EXISTS idx_lgpd_requests_protocol ON lgpd_requests(protocol);
-CREATE INDEX IF NOT EXISTS idx_lgpd_requests_created_at ON lgpd_requests(created_at DESC);
+ALTER TABLE public.schools ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.student_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.student_educators ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.nps_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sync_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.lgpd_requests ENABLE ROW LEVEL SECURITY;
 
--- ============================================================================
--- 7. Configuração de Row Level Security (RLS) e Políticas de Acesso Controlado
--- ============================================================================
-ALTER TABLE schools ENABLE ROW LEVEL SECURITY;
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE student_records ENABLE ROW LEVEL SECURITY;
-ALTER TABLE nps_records ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE lgpd_requests ENABLE ROW LEVEL SECURITY;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'schools' AND policyname = 'schools_app_access') THEN
-    CREATE POLICY schools_app_access ON schools FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'users' AND policyname = 'users_app_access') THEN
-    CREATE POLICY users_app_access ON users FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'student_records' AND policyname = 'student_records_app_access') THEN
-    CREATE POLICY student_records_app_access ON student_records FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'nps_records' AND policyname = 'nps_records_app_access') THEN
-    CREATE POLICY nps_records_app_access ON nps_records FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'audit_logs' AND policyname = 'audit_logs_app_access') THEN
-    CREATE POLICY audit_logs_app_access ON audit_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'lgpd_requests' AND policyname = 'lgpd_requests_app_access') THEN
-    CREATE POLICY lgpd_requests_app_access ON lgpd_requests FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-  END IF;
-END $$;
+NOTIFY pgrst, 'reload schema';

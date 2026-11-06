@@ -32,6 +32,7 @@ import {
 } from './src/utils/authRegistry';
 import {
   acquireSchoolSyncLock,
+  attemptPublicSelfRegistrationInDb,
   authenticateUserInDb,
   comparePortalWithStoredRecords,
   createDatabaseBackup,
@@ -83,6 +84,7 @@ import {
   fetchNpsInvitations as fetchNpsInvitationsFromSupabase,
   fetchStudentRecords as fetchStudentRecordsFromSupabase,
   getContractMaterialCauseOverlay,
+  migrateAllDataToSupabase,
   prioritizeNpsInPortalSupabase,
   replaceNpsRecordsInSupabase,
   replaceStudentRecordsInSupabase,
@@ -227,8 +229,9 @@ function seedSchoolCacheFromDbAndSupabase(schoolId: string = currentActiveSchool
     indecxSession.lastFetchedAt = Date.now();
   }
 
-  fetchStudentRecordsFromSupabase(schoolId, codigoEscola)
-    .then((remoteRecords) => {
+  void migrateAllDataToSupabase()
+    .then(() => fetchStudentRecordsFromSupabase(schoolId))
+    .then(async (remoteRecords) => {
       if (remoteRecords && remoteRecords.length > 0) {
         portalSession.cachedAllWeekRecords = remoteRecords.map((r) => {
           const cached = educatorsMap.get(r.contrato);
@@ -261,18 +264,36 @@ function seedSchoolCacheFromDbAndSupabase(schoolId: string = currentActiveSchool
             );
           } catch {}
         }
+      } else {
+        // Se a tabela student_records no Supabase estiver vazia, sincroniza imediatamente do Portal e grava no Supabase
+        const liveRes = await syncLivePortalRecords();
+        if (liveRes.allWeekRecords.length > 0) {
+          await replaceStudentRecordsInSupabase(
+            liveRes.allWeekRecords,
+            schoolId,
+            codigoEscola
+          );
+        }
       }
     })
     .catch(() => {});
 
-  fetchNpsInvitationsFromSupabase(schoolId, codigoEscola)
-    .then((remoteNps) => {
+  fetchNpsInvitationsFromSupabase(schoolId)
+    .then(async (remoteNps) => {
       if (remoteNps && remoteNps.length > 0) {
         indecxSession.cachedActiveInvitations = filterAndDeduplicateAnnualNpsInvitations(
           remoteNps,
           getCurrentBrasiliaYear()
         );
         indecxSession.lastFetchedAt = Date.now();
+      } else {
+        // Se a tabela nps_records no Supabase estiver vazia, sincroniza imediatamente do Indecx e grava no Supabase
+        const npsRes = await syncActiveIndecxNpsInvitations(
+          portalSession.cachedAllWeekRecords
+        );
+        if (npsRes.invitations.length > 0) {
+          await replaceNpsRecordsInSupabase(npsRes.invitations, schoolId);
+        }
       }
     })
     .catch(() => {});
@@ -1058,7 +1079,7 @@ async function fetchSingleWeekdayPortalRecords(
             portalSession.cachedMetadata.unidade
           );
         } catch {}
-        replaceStudentRecordsInSupabase(
+        await replaceStudentRecordsInSupabase(
           combined,
           currentActiveSchoolId,
           PORTAL_MICROLINS_ESCOLA
@@ -1185,7 +1206,7 @@ async function syncLivePortalRecords(semanaParam?: string): Promise<{
               portalSession.cachedMetadata.unidade
             );
           } catch {}
-          replaceStudentRecordsInSupabase(
+          await replaceStudentRecordsInSupabase(
             portalSession.cachedAllWeekRecords,
             currentActiveSchoolId,
             PORTAL_MICROLINS_ESCOLA
@@ -1638,8 +1659,19 @@ async function syncActiveIndecxNpsInvitations(
                 portalSession.cachedMetadata.unidade
               );
             } catch {}
-            replaceNpsRecordsInSupabase(withOverlays, currentActiveSchoolId).catch((err) => {
+            await replaceNpsRecordsInSupabase(withOverlays, currentActiveSchoolId).catch((err) => {
               console.error('[Indecx Sync] Erro na substituição de convites no Supabase:', err);
+            });
+            recordSyncLog({
+              schoolId: currentActiveSchoolId,
+              escolaCodigo: PORTAL_MICROLINS_ESCOLA,
+              syncType: 'INDECX_NPS_ANNUAL_SYNC',
+              status: 'SUCCESS',
+              recordsReceived: allRawItems.length,
+              recordsInserted: withOverlays.length,
+              recordsUpdated: withOverlays.length,
+              divergencesCount: 0,
+              durationMs: Date.now() - now,
             });
             return {
               invitations: withOverlays,
@@ -3145,6 +3177,16 @@ async function startServer() {
     res.json({ ok: true });
   });
 
+  // POST /api/auth/register & /api/auth/signup — Bloqueio estrito de cadastro público (Etapa 4)
+  app.post(['/api/auth/register', '/api/auth/signup'], (req, res) => {
+    const blocked = attemptPublicSelfRegistrationInDb({
+      login: req.body?.login,
+      email: req.body?.email,
+      ipAddress: req.ip || '127.0.0.1',
+    });
+    res.status(blocked.status).json(blocked);
+  });
+
   // POST /api/auth/select-active-user — Sincroniza o usuário ativo do servidor
   app.post('/api/auth/select-active-user', (req, res) => {
     const { schoolId, userId } = req.body || {};
@@ -3876,10 +3918,10 @@ async function startServer() {
     }
   });
 
-  // GET /api/health — Healthcheck de Produção e Monitoramento de Infraestrutura (SQLite + Supabase + Memória)
+  // GET /api/health — Healthcheck de Produção e Monitoramento de Infraestrutura (Supabase Sole Database + Memória)
   app.get('/api/health', async (_req, res) => {
     try {
-      const sqliteStatus = getDatabaseStatusSummary();
+      const dbStatus = getDatabaseStatusSummary();
       const supabaseHealth = await checkSupabaseHealth();
       const mem = process.memoryUsage();
       res.json({
@@ -3893,12 +3935,11 @@ async function startServer() {
           heapUsed: Math.round((mem.heapUsed / 1024 / 1024) * 100) / 100,
           heapTotal: Math.round((mem.heapTotal / 1024 / 1024) * 100) / 100,
         },
-        sqlite: {
-          engine: sqliteStatus.engine,
-          walMode: sqliteStatus.walMode,
-          foreignKeysEnabled: sqliteStatus.foreignKeysEnabled,
-          schemaVersion: sqliteStatus.schemaVersion,
-          counts: sqliteStatus.counts,
+        database: {
+          engine: dbStatus.engine,
+          foreignKeysEnabled: dbStatus.foreignKeysEnabled,
+          schemaVersion: dbStatus.schemaVersion,
+          counts: dbStatus.counts,
         },
         supabase: {
           connected: supabaseHealth.connected,

@@ -38,7 +38,15 @@ import {
   PORTAL_WEEKDAY_LABEL_TO_CODE,
   StudentPerformanceRecord,
 } from './data/microlinsData';
-import { supabase, fetchStudentRecords, fetchNpsInvitations, fetchSchoolsFromSupabase } from './utils/supabaseClient';
+import {
+  supabase,
+  fetchStudentRecords,
+  fetchNpsInvitations,
+  fetchSchoolsFromSupabase,
+  getActiveSupabaseAuthSession,
+  signOutFromSupabaseAuth,
+  subscribeToSupabaseAuthChanges,
+} from './utils/supabaseClient';
 import {
   ALL_NPS_CYCLES,
   ApostilaFilterType,
@@ -85,8 +93,6 @@ import { IndicatorHelpPopover } from './components/IndicatorHelpPopover';
 
 const AUTO_SYNC_INTERVAL_MS = 60_000;
 const FILTER_LOADING_DELAY_MS = 110;
-const THEME_STORAGE_KEY = 'microlins_theme_preference';
-const AUTH_SESSION_STORAGE_KEY = 'microlins_auth_session_v1';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -131,15 +137,6 @@ function computeNpsSignature(list: ActiveNpsInvitation[]): string {
 }
 
 function getInitialTheme(): ThemeMode {
-  if (typeof window === 'undefined') return 'light';
-  try {
-    const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (saved === 'dark' || saved === 'light') {
-      return saved;
-    }
-  } catch {
-    // Ignore storage read errors
-  }
   return 'light';
 }
 
@@ -188,7 +185,7 @@ function resolveDefaultWeekdayFilter(): string {
 }
 
 export default function App() {
-  // Tema Visual Global com Persistência em localStorage (Item 5)
+  // Tema Visual Global (em memória de sessão)
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
 
   useEffect(() => {
@@ -199,11 +196,6 @@ export default function App() {
       root.classList.remove('dark');
     }
     root.setAttribute('data-theme', theme);
-    try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-    } catch {
-      // Ignore storage write errors
-    }
   }, [theme]);
 
   const toggleTheme = useCallback(() => {
@@ -366,7 +358,7 @@ export default function App() {
     }
   });
 
-  // Sessão autenticada (Perfil Administrador ou Perfil da Escola)
+  // Sessão autenticada (Perfil Administrador ou Perfil da Escola — gerenciada via Supabase Auth e Cookie HttpOnly)
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => {
     if (typeof window === 'undefined') return null;
     try {
@@ -394,34 +386,44 @@ export default function App() {
           codigoPortal: defaultSchool.codigoPortal,
         };
       }
-      const saved = window.sessionStorage.getItem(AUTH_SESSION_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as AuthSession;
-        if (parsed && (parsed.role === 'ADMIN' || parsed.role === 'ESCOLA')) {
-          return parsed;
-        }
-      }
     } catch {
-      // Ignore storage errors
+      // Ignore URL parse errors
     }
     return null;
   });
 
-  // Valida e sincroniza sessão ativa com o servidor via Cookie HttpOnly / Bearer
+  // Valida e sincroniza sessão ativa com o servidor via Cookie HttpOnly / Bearer e Supabase Auth
   useEffect(() => {
     let active = true;
     fetch('/api/auth/session', { credentials: 'include' })
       .then((r) => r.json())
-      .then((d) => {
-        if (active && d?.ok && d.session) {
+      .then(async (d) => {
+        if (!active) return;
+        if (d?.ok && d.session) {
           setAuthSession(d.session);
+          return;
+        }
+        const supaSession = await getActiveSupabaseAuthSession();
+        if (active && supaSession) {
+          setAuthSession(supaSession);
         }
       })
-      .catch(() => {
-        // Sem sessão ativa no servidor
+      .catch(async () => {
+        const supaSession = await getActiveSupabaseAuthSession();
+        if (active && supaSession) {
+          setAuthSession(supaSession);
+        }
       });
+
+    const unsubscribe = subscribeToSupabaseAuthChanges((event) => {
+      if (event === 'SIGNED_OUT' && active) {
+        setAuthSession(null);
+      }
+    });
+
     return () => {
       active = false;
+      unsubscribe();
     };
   }, []);
 
@@ -456,14 +458,6 @@ export default function App() {
     ) => {
       setAuthSession(session);
       setEnteredSchoolFromAdmin(false);
-      try {
-        window.sessionStorage.setItem(
-          AUTH_SESSION_STORAGE_KEY,
-          JSON.stringify(session)
-        );
-      } catch {
-        // Ignore storage errors
-      }
       if (session.role === 'ESCOLA') {
         setPortalMeta((prev) => ({
           ...prev,
@@ -487,13 +481,9 @@ export default function App() {
     fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(
       () => {}
     );
+    void signOutFromSupabaseAuth();
     setAuthSession(null);
     setEnteredSchoolFromAdmin(false);
-    try {
-      window.sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
-    } catch {
-      // Ignore storage errors
-    }
   }, []);
 
   // Horário e dia da semana atuais reais em Brasília (America/Sao_Paulo)

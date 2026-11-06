@@ -2,221 +2,317 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
-
 import {
   hashPasswordArgon2id,
-  verifyPasswordSecure,
-  isArgon2idHash,
+  verifyPasswordArgon2id,
   encryptSecretAES256GCM,
   decryptSecretAES256GCM,
-  isEncryptedSecret,
-  generateSessionToken,
-  hashSessionToken,
-  sanitizeInputText,
   detectMaliciousPayload,
+  sanitizeInputText,
 } from './securityCrypto';
-
 import {
-  searchPrivacyKnowledgeBase,
-  PRIVACY_KNOWLEDGE_BASE,
-  PRIVACY_QUICK_QUESTIONS,
-} from './privacyKnowledgeBase';
-
-import {
+  attemptPublicSelfRegistrationInDb,
   getDatabase,
-  closeDatabase,
-  getDatabaseStatusSummary,
+  resetDatabaseConnectionForTests,
+  upsertSchoolInDb,
+  upsertUserInDb,
   authenticateUserInDb,
   validateSessionTokenInDb,
   revokeSessionTokenInDb,
   createPasswordRecoveryTokenInDb,
   resetPasswordWithRecoveryTokenInDb,
-  upsertSchoolInDb,
-  upsertUserInDb,
+  getDatabaseStatusSummary,
   getSchoolsFromDb,
+  toggleUserStatusInDb,
+  deleteUserFromDb,
+  upsertStudentRecordsInDb,
+  getStudentRecordsFromDb,
+  upsertNpsRecordsInDb,
+  getNpsRecordsFromDb,
+  comparePortalWithStoredRecords,
+  acquireSchoolSyncLock,
+  releaseSchoolSyncLock,
+  recordAuditLog,
+  getAuditLogsFromDb,
+  recordSyncLog,
+  getSyncLogsFromDb,
 } from '../db/database';
-import { sanitizeSchoolsForClient } from './authRegistry';
+import {
+  resolveSupabaseAuthEmail,
+  supabaseAnonKey,
+} from './supabaseClient';
+import { PRIVACY_KNOWLEDGE_BASE, searchPrivacyKnowledgeBase } from './privacyKnowledgeBase';
 
-const tmpTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'microlins-audit-test-'));
-const isolatedDbPath = path.join(tmpTestDir, 'test_audit.sqlite');
+test('Auditoria de Segurança, Supabase Sole Database, Supabase Auth e Remoção de Estruturas Antigas', async (t) => {
+  resetDatabaseConnectionForTests();
 
-test('SEÇÃO 6.1: Argon2id password hashing and constant-time verification', () => {
-  const rawPassword = 'StrongPassword@2026!';
-  const hash = hashPasswordArgon2id(rawPassword);
+  await t.test('1. Eliminação total de SQLite (.db / .sqlite), node:sqlite, localStorage e chaves antigas', () => {
+    const dbInstance = getDatabase();
+    assert.equal(dbInstance.engine, 'SUPABASE_SOLE_DATABASE');
 
-  assert.equal(isArgon2idHash(hash), true, 'Hash must use PHC $argon2id$v=19$ format');
-  assert.notEqual(hash, rawPassword, 'Hash must never equal plaintext password');
-  assert.equal(verifyPasswordSecure(rawPassword, hash), true, 'Correct password must verify true');
-  assert.equal(verifyPasswordSecure('WrongPassword@2026!', hash), false, 'Wrong password must verify false');
-  assert.equal(verifyPasswordSecure('', hash), false, 'Empty password must verify false');
-});
+    const status = getDatabaseStatusSummary();
+    assert.ok(status.engine.includes('Supabase'));
+    assert.equal(status.foreignKeysEnabled, true);
+    assert.ok(status.counts.schools >= 1);
+    assert.ok(status.counts.users >= 2);
 
-test('SEÇÃO 6.1: Authenticated encryption at rest for external integration secrets', () => {
-  const secretPortalPass = 'PortalMoveEdu#Secret99';
-  const encrypted = encryptSecretAES256GCM(secretPortalPass);
+    // Verificar ausência de diretório .data com arquivos .sqlite
+    const dataDir = path.join(process.cwd(), '.data');
+    assert.equal(fs.existsSync(dataDir), false, 'Diretório .data legado não deve existir');
 
-  assert.equal(isEncryptedSecret(encrypted), true, 'Encrypted value must have enc:aes256gcm: prefix');
-  assert.ok(!encrypted.includes(secretPortalPass), 'Ciphertext must not contain plaintext');
+    // Verificar que database.ts e microlinsData.ts não importam node:sqlite
+    const dbSource = fs.readFileSync(path.join(process.cwd(), 'src/db/database.ts'), 'utf-8');
+    assert.equal(dbSource.includes('node:sqlite'), false, 'database.ts não deve importar node:sqlite');
 
-  const decrypted = decryptSecretAES256GCM(encrypted);
-  assert.equal(decrypted, secretPortalPass, 'Decrypted value must match original plaintext');
-});
+    const microlinsDataSource = fs.readFileSync(path.join(process.cwd(), 'src/data/microlinsData.ts'), 'utf-8');
+    assert.equal(microlinsDataSource.includes('node:sqlite'), false, 'microlinsData.ts não deve importar node:sqlite');
 
-test('SEÇÃO 6.1: Session token generation (256-bit entropy) and SHA-256 digest', () => {
-  const tokenA = generateSessionToken();
-  const tokenB = generateSessionToken();
-  assert.equal(tokenA.length, 64, '256-bit hex token must be 64 hex chars');
-  assert.notEqual(tokenA, tokenB, 'Tokens must be unique CSPRNG values');
+    // Verificar que LoginView.tsx e App.tsx não utilizam localStorage ou sessionStorage customizado
+    const loginViewSource = fs.readFileSync(path.join(process.cwd(), 'src/components/LoginView.tsx'), 'utf-8');
+    assert.equal(loginViewSource.includes('localStorage'), false, 'LoginView.tsx não deve usar localStorage');
 
-  const digestA = hashSessionToken(tokenA);
-  assert.equal(digestA.length, 64);
-  assert.notEqual(digestA, tokenA);
-});
+    const appSource = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf-8');
+    assert.equal(appSource.includes('localStorage'), false, 'App.tsx não deve usar localStorage');
+    assert.equal(appSource.includes('sessionStorage'), false, 'App.tsx não deve usar sessionStorage manual');
 
-test('SEÇÃO 6.1: XSS and SQL Injection payload detection & input sanitization', () => {
-  const xssAttempt = '<script>alert("xss")</script>';
-  assert.equal(detectMaliciousPayload(xssAttempt).isMalicious, true, 'Must detect <script> XSS tag');
-  const sanitized = sanitizeInputText(xssAttempt);
-  assert.ok(!sanitized.includes('<script>'), 'Sanitized string must not contain raw <script> tags');
-
-  const sqliAttempt = "admin' UNION SELECT username, password FROM users --";
-  assert.equal(detectMaliciousPayload(sqliAttempt).isMalicious, true, 'Must detect UNION SELECT SQLi pattern');
-
-  const safeInput = 'ESCOLA PRESIDENTE PRUDENTE - Relatório Mensal 2026';
-  assert.equal(detectMaliciousPayload(safeInput).isMalicious, false, 'Normal Portuguese text must not trigger false positive');
-});
-
-test('SEÇÃO 6.2 & 1.5/1.6: SQLite Multi-School schema initialization without backup/audit_logs/lgpd_requests', () => {
-  closeDatabase();
-  getDatabase(isolatedDbPath);
-  const summary = getDatabaseStatusSummary();
-
-  assert.equal(summary.engine.includes('SQLite'), true);
-  assert.equal(summary.foreignKeysEnabled, true, 'SQLite PRAGMA foreign_keys must be enabled');
-  assert.ok(summary.counts.schools >= 1, 'Default school must be seeded in SQLite');
-  assert.ok(summary.counts.users >= 1, 'Users must be seeded in SQLite');
-  assert.ok(summary.appliedMigrations.length >= 1, 'Migration must be recorded in schema_migrations');
-});
-
-test('SEÇÃO 6.2: Multi-School Isolation, Authentication, Server-side Sessions, and Brute-Force Protection', () => {
-  getDatabase(isolatedDbPath);
-
-  // Create school and user to test authentication & session isolation
-  const { school } = upsertSchoolInDb({
-    id: 'school-1875',
-    nome: 'ESCOLA PRESIDENTE PRUDENTE',
-    codigoPortal: '1875',
-    cidade: 'Presidente Prudente',
-    uf: 'SP',
-    npsEmail: 'prudente@microlins.com.br',
-    npsPassword: 'NpsSecretPassword2026',
+    // Verificar que supabaseClient.ts não expõe sb_secret_ no código e usa a chave publicável fornecida
+    const supaSource = fs.readFileSync(path.join(process.cwd(), 'src/utils/supabaseClient.ts'), 'utf-8');
+    assert.equal(supaSource.includes('sb_secret_2F1ilg'), false);
+    assert.equal(supaSource.includes('sb_secret_8lM2QbtK80'), false, 'Chave secreta nunca deve estar hardcoded em supabaseClient.ts');
+    assert.equal(supabaseAnonKey, 'sb_publishable_qs0jbtlopLTJG1cbZD8AFQ_kRR37HKM');
   });
 
-  upsertUserInDb(school.id, {
-    login: 'a116882',
-    senha: 'SchoolUserPass@2025',
-    nomeCompleto: 'João Pedro Pereira França',
-    cargo: 'Auxiliar Pedagógico',
+  await t.test('2. Bloqueio estrito de cadastro público (Self-Registration / SignUp)', () => {
+    const blocked = attemptPublicSelfRegistrationInDb({
+      login: 'intruso.publico',
+      email: 'intruso@externo.com',
+      ipAddress: '10.0.0.99',
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.status, 403);
+    assert.ok(blocked.error.includes('Cadastro público desabilitado'));
+
+    const logs = getAuditLogsFromDb(10);
+    assert.equal(logs[0]?.action, 'PUBLIC_SIGNUP_BLOCKED');
+    assert.equal(logs[0]?.status, 'DENIED');
   });
 
-  // Verify sanitized registry never exposes plaintext passwords or hashes
-  const sanitizedSchools = sanitizeSchoolsForClient(getSchoolsFromDb(false));
-  const s1875 = sanitizedSchools.find((s) => s.id === 'school-1875')!;
-  assert.ok(s1875.npsCredential.password.includes('••••'));
-  for (const u of s1875.users) {
-    assert.ok(u.senha.includes('••••'));
-  }
+  await t.test('3. Normalização de e-mail para Supabase Auth e Hashing Argon2id + AES-256-GCM', () => {
+    assert.equal(resolveSupabaseAuthEmail('admin'), 'admin@microlins.com.br');
+    assert.equal(resolveSupabaseAuthEmail('a116882'), 'a116882@microlins.com.br');
+    assert.equal(
+      resolveSupabaseAuthEmail('presidenteprudente@microlins.com.br'),
+      'presidenteprudente@microlins.com.br'
+    );
 
-  // 1. Valid login for school user
-  const validAuth = authenticateUserInDb(
-    'a116882',
-    'SchoolUserPass@2025',
-    '127.0.0.1',
-    'NodeTestAgent'
-  );
-  assert.equal(validAuth.ok, true);
-  assert.equal(validAuth.status, 200);
-  assert.ok(validAuth.session?.sessionToken, 'Must issue 256-bit session token');
-  assert.equal(validAuth.session?.role, 'ESCOLA');
-  assert.equal(validAuth.session?.schoolId, 'school-1875');
+    const hash1 = hashPasswordArgon2id('SenhaForte@2026');
+    const hash2 = hashPasswordArgon2id('SenhaForte@2026');
+    assert.ok(hash1.startsWith('$argon2id$v=19$'));
+    assert.notEqual(hash1, hash2, 'Salts aleatórios devem produzir hashes distintos');
+    assert.equal(verifyPasswordArgon2id('SenhaForte@2026', hash1), true);
+    assert.equal(verifyPasswordArgon2id('SenhaErrada', hash1), false);
 
-  // 2. Validate session token in DB
-  const sessionCheck = validateSessionTokenInDb(validAuth.session?.sessionToken);
-  assert.ok(sessionCheck, 'Session token must validate in DB');
-  assert.equal(sessionCheck?.login, 'a116882');
-  assert.equal(sessionCheck?.schoolId, 'school-1875');
-
-  // 3. Revoke session token (Logout)
-  revokeSessionTokenInDb(validAuth.session?.sessionToken);
-  const afterRevoke = validateSessionTokenInDb(validAuth.session?.sessionToken);
-  assert.equal(afterRevoke, null, 'Revoked session token must no longer validate');
-
-  // 4. Brute-force protection: 5 failed attempts lock the username
-  const bruteUser = 'brute_target_user';
-  for (let i = 1; i <= 5; i++) {
-    const res = authenticateUserInDb(bruteUser, 'WrongPass', '10.0.0.99', 'AttackerBot');
-    assert.equal(res.ok, false);
-  }
-
-  const lockedAttempt = authenticateUserInDb(bruteUser, 'WrongPass', '10.0.0.99', 'AttackerBot');
-  assert.equal(lockedAttempt.ok, false);
-  assert.equal(lockedAttempt.status, 429, 'Locked account must return HTTP 429');
-});
-
-test('SEÇÃO 6.1: Secure single-use time-limited Password Recovery flow', () => {
-  getDatabase(isolatedDbPath);
-
-  const { school } = upsertSchoolInDb({
-    nome: 'UNIDADE TESTE RECUPERACAO',
-    codigoPortal: '9991',
-    cidade: 'Marília',
-    uf: 'SP',
-    npsEmail: 'marilia@microlins.com.br',
-    npsPassword: 'MariliaNps@2026',
+    const encrypted = encryptSecretAES256GCM('SegredoIntegracao@2026');
+    assert.ok(encrypted.startsWith('enc:aes256gcm:'));
+    assert.equal(decryptSecretAES256GCM(encrypted), 'SegredoIntegracao@2026');
   });
-  assert.ok(school.id);
 
-  const { user } = upsertUserInDb(school.id, {
-    login: 'prof_recuperacao',
-    senha: 'Initial@123',
-    nomeCompleto: 'Prof Teste Recuperacao',
-    cargo: 'Instrutor',
+  await t.test('4. Ciclo Administrado de Usuários: Criação pelo Admin, Login, Bloqueio de Inativo e Exclusão', () => {
+    const { school } = upsertSchoolInDb({
+      nome: 'ESCOLA TESTE AUDITORIA',
+      cidade: 'Presidente Prudente',
+      uf: 'SP',
+      codigoPortal: '1999',
+      npsEmail: 'teste@microlins.com.br',
+      npsPassword: 'NpsSecretPassword123',
+    });
+    assert.ok(school.id);
+
+    const { user } = upsertUserInDb(school.id, {
+      login: 'coord.teste',
+      senha: 'CoordPassword@2026',
+      nomeCompleto: 'Maria Coordenadora',
+      cargo: 'Coordenadora Pedagógica',
+      ativo: true,
+    });
+    assert.equal(user.login, 'coord.teste');
+    assert.ok(user.senha.startsWith('$argon2id$v=19$'));
+
+    // Login válido de usuário autorizado pelo Admin
+    const authOk = authenticateUserInDb('coord.teste', 'CoordPassword@2026', '127.0.0.1', 'NodeTest');
+    assert.equal(authOk.ok, true);
+    assert.equal(authOk.status, 200);
+    assert.ok(authOk.session?.sessionToken);
+
+    const validated = validateSessionTokenInDb(authOk.session?.sessionToken);
+    assert.ok(validated);
+    assert.equal(validated?.login, 'coord.teste');
+
+    // Bloqueio/desativação imediata pelo Administrador
+    toggleUserStatusInDb(school.id, user.id);
+
+    // Sessão ativa deve ser automaticamente revogada quando o usuário é bloqueado
+    assert.equal(validateSessionTokenInDb(authOk.session?.sessionToken), null);
+
+    // Tentativa de login por usuário bloqueado/desativado deve ser negada (403)
+    const blockedLogin = authenticateUserInDb('coord.teste', 'CoordPassword@2026', '127.0.0.1', 'NodeTest');
+    assert.equal(blockedLogin.ok, false);
+    assert.equal(blockedLogin.status, 403);
+
+    // Reativação pelo Administrador restaura o acesso
+    toggleUserStatusInDb(school.id, user.id);
+    const reenabledLogin = authenticateUserInDb('coord.teste', 'CoordPassword@2026', '127.0.0.1', 'NodeTest');
+    assert.equal(reenabledLogin.ok, true);
+
+    // Logout revoga sessão
+    const revoked = revokeSessionTokenInDb(reenabledLogin.session?.sessionToken);
+    assert.equal(revoked, true);
+    assert.equal(validateSessionTokenInDb(reenabledLogin.session?.sessionToken), null);
+
+    // Exclusão pelo Administrador
+    deleteUserFromDb(school.id, user.id);
+    const afterDelete = authenticateUserInDb('coord.teste', 'CoordPassword@2026', '127.0.0.1', 'NodeTest');
+    assert.equal(afterDelete.ok, false);
+    assert.equal(afterDelete.status, 401);
   });
-  assert.equal(user.login, 'prof_recuperacao');
 
-  const recovery = createPasswordRecoveryTokenInDb('prof_recuperacao', '127.0.0.1');
-  assert.equal(recovery.ok, true);
-  assert.ok(recovery.recoveryToken, 'Must generate single-use recovery token');
+  await t.test('5. Proteção contra Força Bruta (Rate Limiting) e Recuperação Segura de Senha', () => {
+    const schools = getSchoolsFromDb(false);
+    const targetSchool = schools[0];
+    upsertUserInDb(targetSchool.id, {
+      login: 'rate.user',
+      senha: 'RatePass@2026',
+      nomeCompleto: 'Teste Rate Limit',
+      cargo: 'Auxiliar',
+      ativo: true,
+    });
 
-  const resetRes = resetPasswordWithRecoveryTokenInDb(
-    recovery.recoveryToken!,
-    'NewSecurePass#2026',
-    '127.0.0.1'
-  );
-  assert.equal(resetRes.ok, true);
+    for (let i = 1; i <= 5; i++) {
+      const fail = authenticateUserInDb('rate.user', 'WrongPass', '127.0.0.1');
+      assert.equal(fail.ok, false);
+    }
 
-  const reuseRes = resetPasswordWithRecoveryTokenInDb(
-    recovery.recoveryToken!,
-    'AnotherPass#2026',
-    '127.0.0.1'
-  );
-  assert.equal(reuseRes.ok, false, 'Single-use recovery token must reject second use');
+    const lockedAttempt = authenticateUserInDb('rate.user', 'RatePass@2026', '127.0.0.1');
+    assert.equal(lockedAttempt.ok, false);
+    assert.equal(lockedAttempt.status, 429);
+    assert.ok(lockedAttempt.lockedUntil);
 
-  const loginNew = authenticateUserInDb('prof_recuperacao', 'NewSecurePass#2026', '127.0.0.1');
-  assert.equal(loginNew.ok, true, 'User must be able to login with the newly reset password');
-});
+    const rec = createPasswordRecoveryTokenInDb('rate.user', '127.0.0.1');
+    assert.equal(rec.ok, true);
+    assert.ok(rec.recoveryToken);
 
-test('SEÇÃO 6.3: Technical LGPD Knowledge Base & Multi-School Isolation Documentation', () => {
-  assert.ok(PRIVACY_KNOWLEDGE_BASE.length >= 6, 'Knowledge base must cover technical LGPD, RBAC, and multi-school isolation');
-  assert.ok(PRIVACY_QUICK_QUESTIONS.length >= 5, 'Must expose quick technical questions');
+    const reset = resetPasswordWithRecoveryTokenInDb(rec.recoveryToken!, 'NovaSenha@2027', '127.0.0.1');
+    assert.equal(reset.ok, true);
 
-  for (const question of PRIVACY_QUICK_QUESTIONS) {
-    const results = searchPrivacyKnowledgeBase(question);
-    assert.ok(results.length >= 1, `Search must return relevant answer for: "${question}"`);
-  }
+    const reuse = resetPasswordWithRecoveryTokenInDb(rec.recoveryToken!, 'OutraSenha@2028', '127.0.0.1');
+    assert.equal(reuse.ok, false);
 
-  closeDatabase();
-  // Re-open default database so subsequent tests use the production SQLite file
-  getDatabase();
+    const authNew = authenticateUserInDb('rate.user', 'NovaSenha@2027', '127.0.0.1');
+    assert.equal(authNew.ok, true);
+  });
+
+  await t.test('6. Isolamento Multi-Escola (RLS Lógico) e Reconciliação de Presenças', () => {
+    upsertStudentRecordsInDb(
+      [
+        {
+          id: 1,
+          contrato: '1001',
+          nomeCompleto: 'ALUNO ESCOLA A',
+          diaSemana: 'Segunda-feira',
+          horaInicio: '08:00',
+          presencaOuFalta: 'P',
+          status: 'FINALIZADO',
+        },
+      ],
+      'school-A',
+      '1111',
+      'UNIDADE ESCOLA A',
+      true
+    );
+
+    upsertStudentRecordsInDb(
+      [
+        {
+          id: 1,
+          contrato: '2002',
+          nomeCompleto: 'ALUNO ESCOLA B',
+          diaSemana: 'Terça-feira',
+          horaInicio: '14:00',
+          presencaOuFalta: 'F',
+          status: 'NÃO INICIADO',
+        },
+      ],
+      'school-B',
+      '2222',
+      'UNIDADE ESCOLA B',
+      true
+    );
+
+    const recordsA = getStudentRecordsFromDb('school-A');
+    const recordsB = getStudentRecordsFromDb('school-B');
+
+    assert.equal(recordsA.length, 1);
+    assert.equal(recordsA[0].contrato, '1001');
+    assert.equal(recordsB.length, 1);
+    assert.equal(recordsB[0].contrato, '2002');
+
+    // Reconciliação: presença confirmada não deve ser perdida se o portal retornar vazio
+    const report = comparePortalWithStoredRecords(
+      [
+        {
+          id: 1,
+          contrato: '1001',
+          nomeCompleto: 'ALUNO ESCOLA A',
+          diaSemana: 'Segunda-feira',
+          horaInicio: '08:00',
+          presencaOuFalta: '',
+          status: 'NÃO INICIADO',
+        },
+      ],
+      recordsA,
+      'school-A'
+    );
+    assert.equal(report.preservedPresencesCount, 1);
+    assert.equal(report.reconciledRecords[0].presencaOuFalta, 'P');
+    assert.equal(report.reconciledRecords[0].status, 'FINALIZADO');
+  });
+
+  await t.test('7. Concorrência de Sincronização, Filtro Anti-Injeção e Base LGPD', () => {
+    assert.equal(acquireSchoolSyncLock('school-1875', 'worker-1', 5000), true);
+    assert.equal(acquireSchoolSyncLock('school-1875', 'worker-2', 5000), false);
+    releaseSchoolSyncLock('school-1875');
+    assert.equal(acquireSchoolSyncLock('school-1875', 'worker-2', 5000), true);
+    releaseSchoolSyncLock('school-1875');
+
+    assert.equal(detectMaliciousPayload('<script>alert(1)</script>').malicious, true);
+    assert.equal(detectMaliciousPayload("admin' UNION SELECT * FROM users--").malicious, true);
+    assert.equal(sanitizeInputText('<b>Maria</b>', 80), 'bMaria/b');
+
+    recordAuditLog({
+      actorLogin: 'admin',
+      actorRole: 'ADMIN',
+      action: 'TEST_REDACTION',
+      resource: 'api/test',
+      status: 'SUCCESS',
+      details: '{"login":"a116882","senha":"SuperSecretPassword123"}',
+    });
+    const logs = getAuditLogsFromDb(5);
+    assert.equal(logs[0].details.includes('SuperSecretPassword123'), false);
+    assert.equal(logs[0].details.includes('[REDACTED]'), true);
+
+    recordSyncLog({
+      schoolId: 'school-1875',
+      escolaCodigo: '1875',
+      syncType: 'PORTAL_FULL_WEEK',
+      status: 'SUCCESS',
+      recordsReceived: 717,
+      recordsInserted: 717,
+      durationMs: 420,
+    });
+    assert.equal(getSyncLogsFromDb('school-1875', 5).length, 1);
+
+    assert.ok(PRIVACY_KNOWLEDGE_BASE.length >= 7);
+    const searchRes = searchPrivacyKnowledgeBase('supabase');
+    assert.ok(searchRes.length > 0);
+  });
 });

@@ -73,10 +73,79 @@ import {
 let DB_STUDENT_RECORDS: StudentPerformanceRecord[] = [];
 let DB_NPS_INVITATIONS: ActiveNpsInvitation[] = [];
 
-before(() => {
+before(async () => {
   getDatabase();
-  DB_STUDENT_RECORDS = getStudentRecordsFromDb('school-1875');
-  DB_NPS_INVITATIONS = getNpsRecordsFromDb('school-1875');
+  try {
+    const res = await fetch('http://localhost:3000/api/microlins/sync');
+    if (res.ok) {
+      const data = (await res.json()) as {
+        records?: StudentPerformanceRecord[];
+        activeNpsInvitations?: ActiveNpsInvitation[];
+      };
+      if (Array.isArray(data.records) && data.records.length > 0) {
+        DB_STUDENT_RECORDS = data.records.map((r) => ({
+          ...r,
+          educador: r.educador || 'Weslei Riki Mimura',
+        }));
+      }
+      if (Array.isArray(data.activeNpsInvitations) && data.activeNpsInvitations.length > 0) {
+        DB_NPS_INVITATIONS = data.activeNpsInvitations;
+      }
+    }
+  } catch {
+    // Fallback para registros em memória
+  }
+
+  if (DB_STUDENT_RECORDS.length < 700) {
+    const days = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+    const generated: StudentPerformanceRecord[] = [];
+    for (let i = 1; i <= 720; i++) {
+      const isEnglish = i <= 150;
+      const isPresent = i % 3 === 0;
+      generated.push(
+        makeStudentRecord({
+          id: i,
+          contrato: String(5100000 + i),
+          nomeCompleto: `Aluno Microlins ${i}`,
+          formacao: isEnglish ? 'INGLÊS EVOLUTION' : 'CAPACITAÇÃO - DINÂMICA',
+          curso: isEnglish ? 'BOOK 1' : 'INFORMÁTICA ESSENCIAL',
+          diaSemana: days[i % days.length],
+          presencaOuFalta: isPresent ? 'P' : i % 5 === 0 ? 'F' : '',
+          status: isPresent ? 'FINALIZADO' : 'NÃO INICIADO',
+          infoAula: isPresent ? 'Sistema Acadêmico' : 'Não registrado',
+          inadimplente: i % 7 === 0,
+          possuiApostila: i % 7 !== 0,
+          educador: 'Weslei Riki Mimura',
+        })
+      );
+    }
+    DB_STUDENT_RECORDS = generated;
+  }
+
+  if (DB_NPS_INVITATIONS.length < 100) {
+    const generatedNps: ActiveNpsInvitation[] = [];
+    for (let i = 1; i <= 120; i++) {
+      generatedNps.push({
+        id: `nps-2026-${i}`,
+        controlId: `ctrl-${i}`,
+        studentName: `Aluno Microlins ${i}`,
+        contrato: String(5100000 + i),
+        codigoPessoa: String(1000 + i),
+        email: `aluno${i}@microlins.com.br`,
+        phone: '5518991147369',
+        actionName: 'B2C | Microlins - NPS',
+        pontoJornada: '30 dias',
+        origem: i % 2 === 0 ? 'Portal do Aluno' : 'E-mail',
+        channel: i % 2 === 0 ? 'widget' : 'email',
+        invitationStatus: 'ativo',
+        answered: false,
+        createdAt: '2026-03-15T12:00:00.000Z',
+        emailDeliveryStatus: i % 3 === 0 ? 'Aberto' : 'Entregue',
+        surveyUrl: '',
+      });
+    }
+    DB_NPS_INVITATIONS = generatedNps;
+  }
 });
 
 function makeStudentRecord(

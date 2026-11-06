@@ -12,8 +12,8 @@ import { hashPasswordArgon2id } from './securityCrypto';
 import {
   acquireSchoolSyncLock,
   comparePortalWithStoredRecords,
+  deleteSchoolFromDb,
   getAuditLogsFromDb,
-  getDatabase,
   getNpsRecordsFromDb,
   getStudentEducatorsMap,
   getStudentRecordsFromDb,
@@ -303,13 +303,8 @@ test('Seção 4 — Identificação Interna Automática (sch_<uuid>) e Isolament
   assert.ok(getAuditLogsFromDb(50).length >= 1);
 
   // Limpa os registros temporários das escolas simuladas após validar o isolamento
-  const db = getDatabase();
   for (const tid of [idA, idB, idC]) {
-    db.prepare('DELETE FROM student_records WHERE school_id = ?').run(tid);
-    db.prepare('DELETE FROM nps_records WHERE school_id = ?').run(tid);
-    db.prepare('DELETE FROM student_educators WHERE school_id = ?').run(tid);
-    db.prepare('DELETE FROM sync_logs WHERE school_id = ?').run(tid);
-    db.prepare('DELETE FROM schools WHERE id = ?').run(tid);
+    deleteSchoolFromDb(tid);
   }
 });
 

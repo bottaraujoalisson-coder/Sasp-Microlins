@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   AlertCircle,
   Building2,
@@ -19,8 +19,6 @@ import {
 import {
   authenticateUserInSupabase,
 } from '../utils/supabaseClient';
-
-const REMEMBERED_LOGIN_STORAGE_KEY = 'microlins_remembered_login';
 
 interface LoginViewProps {
   schools: RegisteredSchool[];
@@ -53,18 +51,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  useEffect(() => {
-    try {
-      const savedLogin = localStorage.getItem(REMEMBERED_LOGIN_STORAGE_KEY);
-      if (savedLogin) {
-        setLogin(savedLogin);
-        setRememberLogin(true);
-      }
-    } catch {
-      // Ignore localStorage read errors
-    }
-  }, []);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -75,16 +61,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
     if (!cleanLogin || !cleanSenha) {
       setErrorMessage('Informe seu login e senha para acessar o sistema.');
       return;
-    }
-
-    try {
-      if (rememberLogin) {
-        localStorage.setItem(REMEMBERED_LOGIN_STORAGE_KEY, cleanLogin);
-      } else {
-        localStorage.removeItem(REMEMBERED_LOGIN_STORAGE_KEY);
-      }
-    } catch {
-      // Ignore localStorage write errors
     }
 
     setIsSubmitting(true);

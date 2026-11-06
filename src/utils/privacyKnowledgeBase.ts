@@ -39,10 +39,10 @@ export const PRIVACY_KNOWLEDGE_BASE: PrivacyKnowledgeTopic[] = [
     shortAnswer:
       'Os registros operacionais são armazenados em banco de dados relacional com integridade referencial, separação por unidade escolar e comunicação exclusivamente sob HTTPS/TLS.',
     detailedExplanation:
-      'Os dados cadastrais de unidades escolares, perfis de acesso autorizados, agendamentos acadêmicos e convites de pesquisa NPS são persistidos em estrutura relacional (PostgreSQL / SQLite no servidor) com transações atômicas (ACID) e chaves estrangeiras ativas. Segredos de infraestrutura e chaves de API residem estritamente em variáveis de ambiente no servidor, sem exposição ao navegador.',
+      'Os dados cadastrais de unidades escolares, perfis de acesso autorizados, agendamentos acadêmicos e convites de pesquisa NPS são persistidos exclusivamente no banco de dados relacional Supabase (PostgreSQL) com Row Level Security (RLS), transações atômicas (ACID) e chaves estrangeiras ativas. Segredos de infraestrutura e chaves de API residem estritamente em variáveis de ambiente no servidor, sem exposição ao navegador.',
     legalBasis: 'Art. 46 da LGPD (Lei nº 13.709/2018)',
     technicalProof:
-      'Tabelas relacionais estruturadas (schools, users, sessions, student_records, nps_records) com validação de esquema e restrições de chave estrangeira.',
+      'Tabelas relacionais estruturadas no Supabase (schools, users, student_records, student_educators, nps_records, audit_logs, sync_logs) com RLS ativo e restrições de chave estrangeira.',
     keywords: [
       'como meus dados sao armazenados',
       'armazenamento',
@@ -51,7 +51,7 @@ export const PRIVACY_KNOWLEDGE_BASE: PrivacyKnowledgeTopic[] = [
       'guardados',
       'salvos',
       'postgresql',
-      'sqlite',
+      'supabase',
       'persistencia',
     ],
   },

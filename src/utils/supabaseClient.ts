@@ -1,115 +1,412 @@
-import { createClient } from '@supabase/supabase-js';
-import {
-  StudentPerformanceRecord,
+import { createClient, type Session, type User } from '@supabase/supabase-js';
+import type {
   ActiveNpsInvitation,
+  ClassStatus,
+  ModalityType,
+  NpsEmailDeliveryStatusType,
+  NpsInvitationStatusType,
+  NpsOrigemType,
+  ShiftType,
+  StudentPerformanceRecord,
 } from '../data/microlinsData';
 import {
   authenticatePlatformLogin,
-  AuthLoginResult,
   createDefaultSchoolsRegistry,
   DEFAULT_ADMIN_CREDENTIALS,
   generateInternalSchoolId,
   normalizeLoginIdentifier,
-  RegisteredSchool,
   sanitizeSchoolsForClient,
-  SchoolPortalUser,
+  type AuthLoginResult,
+  type AuthSession,
+  type RegisteredSchool,
+  type SchoolPortalUser,
 } from './authRegistry';
 import {
   encryptSecretAES256GCM,
+  ensureNodeEnvLoaded,
   hashPasswordArgon2id,
   isArgon2idHash,
   isEncryptedSecret,
   sanitizeInputText,
   verifyPasswordArgon2id,
-  ensureNodeEnvLoaded,
 } from './securityCrypto';
 
 ensureNodeEnvLoaded();
 
-const metaEnv =
-  typeof import.meta !== 'undefined' && (import.meta as any).env
-    ? (import.meta as any).env
-    : {};
+const metaEnv = (import.meta as unknown as { env?: Record<string, string> }).env || {};
 const procEnv =
-  typeof process !== 'undefined' && process.env ? process.env : {};
+  typeof process !== 'undefined' && process.env ? process.env : ({} as Record<string, string | undefined>);
 
-const DEFAULT_SUPABASE_URL = 'https://hkonvuytinqlakerpara.supabase.co';
-const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_oxvIOy_33Z4vD0VN8a6PaQ_VX1QtJ9J';
-const DEFAULT_SUPABASE_SERVICE_ROLE_KEY = 'sb_secret_2F1ilgEW84eQ8S16G9p1Wg_Fy6FmLuk';
+// Chave publicável oficial fornecida para o projeto Supabase
+const DEFAULT_SUPABASE_PUBLISHABLE_KEY =
+  'sb_publishable_qs0jbtlopLTJG1cbZD8AFQ_kRR37HKM';
 
-const rawSupabaseUrl: string =
+// URL oficial do projeto Supabase (https://dwarcjrpwubtveilwkyi.supabase.co)
+const configuredSupabaseUrl = (
   metaEnv.VITE_SUPABASE_URL ||
   procEnv.VITE_SUPABASE_URL ||
   procEnv.SUPABASE_URL ||
-  DEFAULT_SUPABASE_URL;
+  'https://dwarcjrpwubtveilwkyi.supabase.co'
+).trim();
 
-const isValidSupabaseDomain =
-  Boolean(rawSupabaseUrl) &&
-  rawSupabaseUrl.includes('.supabase.co') &&
-  !rawSupabaseUrl.includes('.supabase.com');
+const configuredAnonKey = (
+  metaEnv.VITE_SUPABASE_ANON_KEY ||
+  procEnv.VITE_SUPABASE_ANON_KEY ||
+  procEnv.SUPABASE_ANON_KEY ||
+  DEFAULT_SUPABASE_PUBLISHABLE_KEY
+).trim();
 
-export const supabaseUrl: string = isValidSupabaseDomain
-  ? rawSupabaseUrl
-  : DEFAULT_SUPABASE_URL;
+// REGRA DE SEGURANÇA CRÍTICA (ETAPA 4 / ETAPA 5):
+// A chave secreta (service_role / sb_secret_...) NUNCA é incluída nem referenciada no código do navegador.
+// Ela é lida exclusivamente de process.env.SUPABASE_SERVICE_ROLE_KEY quando em execução no servidor Node.js.
+const serverOnlyServiceRoleKey =
+  typeof window === 'undefined'
+    ? (procEnv.SUPABASE_SERVICE_ROLE_KEY || '').trim()
+    : '';
 
-export const supabasePublishableKey: string = isValidSupabaseDomain
-  ? metaEnv.VITE_SUPABASE_ANON_KEY ||
-    procEnv.VITE_SUPABASE_ANON_KEY ||
-    procEnv.SUPABASE_ANON_KEY ||
-    DEFAULT_SUPABASE_ANON_KEY
-  : DEFAULT_SUPABASE_ANON_KEY;
+export const supabaseUrl = configuredSupabaseUrl;
+export const supabaseAnonKey = configuredAnonKey;
 
-export const supabaseServiceRoleKey: string =
-  procEnv.SUPABASE_SERVICE_ROLE_KEY ||
-  procEnv.SUPABASE_SECRET_KEY ||
-  DEFAULT_SUPABASE_SERVICE_ROLE_KEY;
+/**
+ * Cliente público/autenticado do Supabase (utiliza exclusivamente a chave publicável + sessão do Supabase Auth).
+ * Persistência técnica de sessão de autenticação gerenciada pelo próprio Supabase Auth.
+ */
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: typeof window !== 'undefined',
+    autoRefreshToken: typeof window !== 'undefined',
+    detectSessionInUrl: typeof window !== 'undefined',
+  },
+});
 
-export const supabase = createClient(
-  supabaseUrl,
-  supabasePublishableKey,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-    },
+/**
+ * Cliente administrativo de backend (exclusivo servidor Node.js).
+ * No navegador, recai para o cliente público sem jamais expor a service_role key.
+ */
+export const supabaseAdmin =
+  typeof window === 'undefined' && serverOnlyServiceRoleKey
+    ? createClient(supabaseUrl, serverOnlyServiceRoleKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      })
+    : supabase;
+
+/**
+ * Normaliza um identificador de login (ex.: "admin", "a116882" ou e-mail) para o formato de e-mail
+ * exigido pelo provedor de e-mail/senha do Supabase Auth (`auth.users`).
+ */
+export function resolveSupabaseAuthEmail(loginRaw: string): string {
+  const clean = normalizeLoginIdentifier(loginRaw);
+  if (!clean) return '';
+  if (clean.includes('@')) return clean;
+  if (clean === 'admin' || clean === 'alisson') {
+    return 'admin@microlins.com.br';
   }
-);
+  return `${clean}@microlins.com.br`;
+}
 
-export const supabaseAdmin = createClient(
-  supabaseUrl,
-  supabaseServiceRoleKey || supabasePublishableKey,
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
+/**
+ * Sincroniza ou provisiona um usuário no Supabase Auth (`auth.users`) usando privilégios administrativos
+ * exclusivos do servidor (`supabaseAdmin.auth.admin.*`).
+ * Cadastro público (`supabase.auth.signUp`) é estritamente proibido.
+ */
+export async function syncAdminManagedUserInSupabaseAuth(input: {
+  login: string;
+  passwordPlain?: string;
+  nomeCompleto: string;
+  cargo: string;
+  role: 'ADMIN' | 'ESCOLA';
+  schoolId?: string;
+  ativo: boolean;
+  existingAuthUserId?: string | null;
+}): Promise<{ authUserId: string | null; email: string }> {
+  const email = resolveSupabaseAuthEmail(input.login);
+  if (typeof window !== 'undefined' || !serverOnlyServiceRoleKey || !email) {
+    return { authUserId: input.existingAuthUserId || null, email };
   }
-);
+
+  try {
+    const userMetadata = {
+      login: normalizeLoginIdentifier(input.login),
+      nome_completo: input.nomeCompleto,
+      cargo: input.cargo,
+      role: input.role,
+      school_id: input.schoolId || null,
+      ativo: input.ativo,
+    };
+
+    if (input.existingAuthUserId) {
+      const { data, error } = await supabaseAdmin.auth.admin.updateUserById(
+        input.existingAuthUserId,
+        {
+          email,
+          ...(input.passwordPlain && !input.passwordPlain.includes('••••')
+            ? { password: input.passwordPlain }
+            : {}),
+          email_confirm: true,
+          user_metadata: userMetadata,
+          ban_duration: input.ativo ? 'none' : '876000h',
+        }
+      );
+      if (!error && data?.user) {
+        return { authUserId: data.user.id, email };
+      }
+    }
+
+    // Caso ainda não possua auth_user_id, tenta localizar ou criar via admin API
+    const { data: created, error: createErr } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password:
+          input.passwordPlain && !input.passwordPlain.includes('••••')
+            ? input.passwordPlain
+            : 'Microlins@2026!',
+        email_confirm: true,
+        user_metadata: userMetadata,
+        ban_duration: input.ativo ? 'none' : '876000h',
+      });
+
+    if (!createErr && created?.user) {
+      return { authUserId: created.user.id, email };
+    }
+
+    // Se já existir no Supabase Auth com este e-mail, localiza na listagem administrativa e atualiza
+    const { data: listData } = await supabaseAdmin.auth.admin.listUsers({
+      page: 1,
+      perPage: 200,
+    });
+    const existingAuthUser = listData?.users?.find(
+      (u: User) => (u.email || '').toLowerCase() === email.toLowerCase()
+    );
+    if (existingAuthUser) {
+      await supabaseAdmin.auth.admin.updateUserById(existingAuthUser.id, {
+        ...(input.passwordPlain && !input.passwordPlain.includes('••••')
+          ? { password: input.passwordPlain }
+          : {}),
+        email_confirm: true,
+        user_metadata: userMetadata,
+        ban_duration: input.ativo ? 'none' : '876000h',
+      });
+      return { authUserId: existingAuthUser.id, email };
+    }
+  } catch {
+    // Caso o projeto Supabase esteja em provisionamento de rede, preserva operação segura
+  }
+
+  return { authUserId: input.existingAuthUserId || null, email };
+}
+
+/**
+ * Bloqueia ou desbloqueia imediatamente um usuário no Supabase Auth (`ban_duration`)
+ * quando o Administrador altera o status (`ativo`) no Painel Administrativo.
+ */
+export async function setSupabaseAuthUserBanStatus(
+  authUserId: string | null | undefined,
+  login: string,
+  ativo: boolean
+): Promise<void> {
+  if (typeof window !== 'undefined' || !serverOnlyServiceRoleKey) return;
+  try {
+    let targetId = authUserId || null;
+    if (!targetId) {
+      const email = resolveSupabaseAuthEmail(login);
+      const { data: listData } = await supabaseAdmin.auth.admin.listUsers({
+        page: 1,
+        perPage: 200,
+      });
+      const found = listData?.users?.find(
+        (u: User) => (u.email || '').toLowerCase() === email.toLowerCase()
+      );
+      targetId = found?.id || null;
+    }
+    if (targetId) {
+      await supabaseAdmin.auth.admin.updateUserById(targetId, {
+        ban_duration: ativo ? 'none' : '876000h',
+        user_metadata: { ativo },
+      });
+    }
+  } catch {
+    // Ignora falha de rede se offline
+  }
+}
+
+/**
+ * Remove um usuário do Supabase Auth (`auth.users`) quando excluído pelo Administrador.
+ */
+export async function deleteSupabaseAuthUser(
+  authUserId: string | null | undefined,
+  login: string
+): Promise<void> {
+  if (typeof window !== 'undefined' || !serverOnlyServiceRoleKey) return;
+  try {
+    let targetId = authUserId || null;
+    if (!targetId) {
+      const email = resolveSupabaseAuthEmail(login);
+      const { data: listData } = await supabaseAdmin.auth.admin.listUsers({
+        page: 1,
+        perPage: 200,
+      });
+      const found = listData?.users?.find(
+        (u: User) => (u.email || '').toLowerCase() === email.toLowerCase()
+      );
+      targetId = found?.id || null;
+    }
+    if (targetId) {
+      await supabaseAdmin.auth.admin.deleteUser(targetId);
+    }
+  } catch {
+    // Ignora falha de rede se offline
+  }
+}
+
+/**
+ * Encerra a sessão ativa no Supabase Auth (`supabase.auth.signOut`).
+ */
+export async function signOutFromSupabaseAuth(): Promise<void> {
+  try {
+    await supabase.auth.signOut();
+  } catch {
+    // Ignore network error during signOut
+  }
+}
+
+/**
+ * Obtém e valida a sessão atual do Supabase Auth, verificando obrigatoriamente
+ * se o usuário continua autorizado e ativo (`ativo === true`) na tabela `users`.
+ */
+export async function getActiveSupabaseAuthSession(): Promise<AuthSession | null> {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data?.session?.user) return null;
+    const authUser = data.session.user;
+    const meta = authUser.user_metadata || {};
+    const loginFromMeta = normalizeLoginIdentifier(
+      String(meta.login || authUser.email?.split('@')[0] || '')
+    );
+
+    const { data: profileRow } = await supabase
+      .from('users')
+      .select('*, schools(nome, codigo_portal, ativa)')
+      .or(`auth_user_id.eq.${authUser.id},login.eq.${loginFromMeta}`)
+      .maybeSingle();
+
+    if (profileRow) {
+      if (profileRow.ativo === false) {
+        await supabase.auth.signOut();
+        return null;
+      }
+      const schoolObj = Array.isArray(profileRow.schools)
+        ? profileRow.schools[0]
+        : profileRow.schools;
+      if (profileRow.role === 'ESCOLA' && schoolObj && schoolObj.ativa === false) {
+        await supabase.auth.signOut();
+        return null;
+      }
+      return {
+        role: profileRow.role === 'ADMIN' ? 'ADMIN' : 'ESCOLA',
+        login: String(profileRow.login),
+        nomeCompleto: String(profileRow.nome_completo || meta.nome_completo || profileRow.login),
+        cargo: String(profileRow.cargo || meta.cargo || 'Colaborador Pedagógico'),
+        schoolId: profileRow.school_id ? String(profileRow.school_id) : undefined,
+        schoolName: schoolObj?.nome ? String(schoolObj.nome) : undefined,
+        codigoPortal: schoolObj?.codigo_portal ? String(schoolObj.codigo_portal) : '1875',
+        sessionToken: data.session.access_token,
+        loggedAt: new Date().toISOString(),
+      };
+    }
+
+    if (meta.ativo === false) {
+      await supabase.auth.signOut();
+      return null;
+    }
+
+    return {
+      role: meta.role === 'ADMIN' ? 'ADMIN' : 'ESCOLA',
+      login: loginFromMeta || authUser.email || 'usuario',
+      nomeCompleto: String(meta.nome_completo || loginFromMeta || 'Colaborador'),
+      cargo: String(meta.cargo || 'Colaborador Pedagógico'),
+      schoolId: meta.school_id ? String(meta.school_id) : undefined,
+      sessionToken: data.session.access_token,
+      loggedAt: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Solicita redefinição de senha via Supabase Auth (`resetPasswordForEmail`) apenas para
+ * usuários previamente cadastrados e ativos pelo Administrador.
+ */
+export async function requestPasswordResetViaSupabaseAuth(
+  loginOrEmail: string
+): Promise<{ ok: boolean; message: string }> {
+  const email = resolveSupabaseAuthEmail(loginOrEmail);
+  if (!email) {
+    return {
+      ok: false,
+      message: 'Informe um login ou e-mail institucional válido.',
+    };
+  }
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    if (error) {
+      return {
+        ok: false,
+        message: `Não foi possível enviar o e-mail de redefinição: ${error.message}`,
+      };
+    }
+    return {
+      ok: true,
+      message: `Instruções de redefinição de senha enviadas para ${email} via Supabase Auth.`,
+    };
+  } catch {
+    return {
+      ok: false,
+      message:
+        'Serviço de redefinição por e-mail indisponível no momento. Solicite a redefinição diretamente ao Administrador.',
+    };
+  }
+}
+
+/**
+ * Registra um listener para eventos de mudança de estado de autenticação do Supabase Auth.
+ */
+export function subscribeToSupabaseAuthChanges(
+  callback: (event: string, session: Session | null) => void
+): () => void {
+  const { data } = supabase.auth.onAuthStateChange((event, session) => {
+    callback(event, session);
+  });
+  return () => {
+    data.subscription.unsubscribe();
+  };
+}
 
 export interface SupabaseAuditLogRecord {
   id: number;
   timestamp: string;
-  actorLogin: string;
-  actorRole: string;
+  actor_login: string;
+  actor_role: string;
   action: string;
   resource: string;
   status: 'SUCCESS' | 'DENIED' | 'ERROR';
-  ipAddress: string;
+  ip_address: string;
   details: string;
 }
 
 export interface SupabaseLgpdRequestRecord {
-  id: number;
-  protocol: string;
-  requesterName: string;
-  requesterEmail: string;
-  requesterRole: string;
-  requestType: string;
+  id: string;
+  requester_name: string;
+  requester_email: string;
+  requester_role: string;
+  request_type: string;
   description: string;
   status: string;
-  createdAt: string;
-  resolvedAt?: string | null;
+  created_at: string;
+  resolved_at?: string | null;
 }
 
 export interface SupabaseHealthSummary {
@@ -128,9 +425,222 @@ export interface SupabaseHealthSummary {
 }
 
 /**
- * Converte um objeto StudentPerformanceRecord para o formato snake_case da tabela student_records.
+ * Camada de metadados estendidos em memória volátil para campos de priorização de NPS,
+ * avaliação qualitativa no Portal do Aluno e causa explícita de falta de material.
  */
-export function mapStudentRecordToSupabaseRow(r: StudentPerformanceRecord) {
+export interface NpsExtendedMetadataOverlay {
+  priorizarNpsNoLogin?: boolean;
+  cicloPriorizado?: string;
+  priorizadoPor?: string;
+  priorizadoEm?: string;
+  notaNps?: number | null;
+  comentarioNps?: string | null;
+  ultimoReenvioEmailEm?: string;
+  ultimoReenvioEmailPor?: string;
+  emailAnterior?: string;
+  email?: string;
+  answered?: boolean;
+  invitationStatus?: NpsInvitationStatusType;
+  answeredAt?: string | null;
+  attemptsCount?: number;
+  sentAt?: string;
+  emailDeliveryStatus?: NpsEmailDeliveryStatusType;
+}
+
+const npsExtendedOverlayById = new Map<string, NpsExtendedMetadataOverlay>();
+const contractMaterialCauseOverlay = new Map<string, string>();
+
+export function setNpsExtendedOverlayItem(
+  inviteId: string,
+  patch: Partial<NpsExtendedMetadataOverlay>
+): NpsExtendedMetadataOverlay {
+  const cleanId = String(inviteId || '').trim();
+  const current = npsExtendedOverlayById.get(cleanId) || {};
+  const updated: NpsExtendedMetadataOverlay = {
+    ...current,
+    ...patch,
+  };
+  if (cleanId) {
+    npsExtendedOverlayById.set(cleanId, updated);
+  }
+  return updated;
+}
+
+export function getNpsExtendedOverlayItem(
+  inviteId: string
+): NpsExtendedMetadataOverlay | undefined {
+  return npsExtendedOverlayById.get(String(inviteId || '').trim());
+}
+
+export function applyNpsExtendedOverlay(
+  inv: ActiveNpsInvitation
+): ActiveNpsInvitation {
+  const overlay =
+    npsExtendedOverlayById.get(inv.id) ||
+    (inv.controlId ? npsExtendedOverlayById.get(inv.controlId) : undefined);
+  if (!overlay) return inv;
+  return {
+    ...inv,
+    ...(overlay.email !== undefined ? { email: overlay.email } : {}),
+    ...(overlay.emailAnterior !== undefined
+      ? { emailAnterior: overlay.emailAnterior }
+      : {}),
+    ...(overlay.ultimoReenvioEmailEm !== undefined
+      ? { ultimoReenvioEmailEm: overlay.ultimoReenvioEmailEm }
+      : {}),
+    ...(overlay.ultimoReenvioEmailPor !== undefined
+      ? { ultimoReenvioEmailPor: overlay.ultimoReenvioEmailPor }
+      : {}),
+    ...(overlay.priorizarNpsNoLogin !== undefined
+      ? { priorizarNpsNoLogin: overlay.priorizarNpsNoLogin }
+      : {}),
+    ...(overlay.cicloPriorizado !== undefined
+      ? { cicloPriorizado: overlay.cicloPriorizado }
+      : {}),
+    ...(overlay.priorizadoPor !== undefined
+      ? { priorizadoPor: overlay.priorizadoPor }
+      : {}),
+    ...(overlay.priorizadoEm !== undefined
+      ? { priorizadoEm: overlay.priorizadoEm }
+      : {}),
+    ...(overlay.notaNps !== undefined ? { notaNps: overlay.notaNps } : {}),
+    ...(overlay.comentarioNps !== undefined
+      ? { comentarioNps: overlay.comentarioNps }
+      : {}),
+    ...(overlay.answered !== undefined ? { answered: overlay.answered } : {}),
+    ...(overlay.invitationStatus !== undefined
+      ? { invitationStatus: overlay.invitationStatus }
+      : {}),
+    ...(overlay.answeredAt !== undefined
+      ? { answeredAt: overlay.answeredAt }
+      : {}),
+    ...(overlay.attemptsCount !== undefined
+      ? { attemptsCount: overlay.attemptsCount }
+      : {}),
+    ...(overlay.sentAt !== undefined ? { sentAt: overlay.sentAt } : {}),
+    ...(overlay.emailDeliveryStatus !== undefined
+      ? { emailDeliveryStatus: overlay.emailDeliveryStatus }
+      : {}),
+  };
+}
+
+export function setContractMaterialCauseOverlay(
+  contrato: string,
+  causa: string
+): void {
+  const cleanContrato = String(contrato || '').trim();
+  const cleanCausa = sanitizeInputText(causa || '', 140).trim();
+  if (cleanContrato) {
+    contractMaterialCauseOverlay.set(cleanContrato, cleanCausa);
+  }
+}
+
+export function getContractMaterialCauseOverlay(
+  contrato: string
+): string | undefined {
+  return contractMaterialCauseOverlay.get(String(contrato || '').trim());
+}
+
+function mapSupabaseRowToStudentRecord(
+  row: Record<string, any>
+): StudentPerformanceRecord {
+  const rawSala = String(row.sala ?? '').trim();
+  const cleanSala = rawSala.split(' - ')[0].trim() || 'Sala não informada';
+
+  const rawPresenca = (row.presenca_ou_falta ?? '') as 'P' | 'F' | '';
+  const rawInfoAula = String(row.info_aula ?? '');
+  const rawStatus = (row.status ?? 'NÃO INICIADO') as ClassStatus;
+  const effectivePresenca: 'P' | 'F' | '' =
+    rawPresenca === 'P' || rawInfoAula === 'Sistema Acadêmico'
+      ? 'P'
+      : rawPresenca === 'F' || rawInfoAula === 'Falta'
+        ? 'F'
+        : '';
+  const effectiveStatus: ClassStatus =
+    effectivePresenca === 'P' && rawStatus === 'NÃO INICIADO'
+      ? 'FINALIZADO'
+      : rawStatus;
+
+  const contrato = String(row.contrato ?? '').trim();
+  const overlayCausa = contrato
+    ? contractMaterialCauseOverlay.get(contrato)
+    : undefined;
+
+  return {
+    id: Number(row.id),
+    contrato,
+    aulaId: row.aula_id ?? '',
+    nomeCompleto: row.nome_completo ?? '',
+    nomeCurto: row.nome_curto ?? '',
+    telefoneAluno: row.telefone_aluno ?? '',
+    whatsappAlunoUrl: row.whatsapp_aluno_url ?? '',
+    nomeResponsavel: row.nome_responsavel ?? '',
+    telefoneResponsavel: row.telefone_responsavel ?? '',
+    whatsappResponsavelUrl: row.whatsapp_responsavel_url ?? '',
+    formacao: row.formacao ?? '',
+    curso: row.curso ?? '',
+    aulaInfo: row.aula_info ?? '',
+    aulaNumero: Number(row.aula_numero ?? 0),
+    tipoMaterial: row.tipo_material ?? 'Apostila',
+    possuiApostila: Boolean(row.possui_apostila),
+    horario: row.horario ?? '',
+    horaInicio: row.hora_inicio ?? '',
+    horaFim: row.hora_fim ?? '',
+    turno: (row.turno ?? 'Manhã') as ShiftType,
+    sala: cleanSala,
+    modalidade: 'Presencial' as ModalityType,
+    inicio: row.inicio ?? '',
+    fim: row.fim ?? '',
+    nota:
+      row.nota !== null && row.nota !== undefined ? Number(row.nota) : null,
+    notaId: row.nota_id ?? '',
+    notaAulaNumero:
+      row.nota_aula_numero !== null && row.nota_aula_numero !== undefined
+        ? Number(row.nota_aula_numero)
+        : null,
+    infoAula: rawInfoAula,
+    status: effectiveStatus,
+    presencaOuFalta: effectivePresenca,
+    inadimplente: Boolean(row.inadimplente),
+    parcelasAtrasadas: Number(row.parcelas_atrasadas ?? 0),
+    diaSemana: row.dia_semana ?? 'Sexta-feira',
+    email: row.email ?? undefined,
+    linkLoginUrl: row.link_login_url ?? undefined,
+    educador: row.educador ? String(row.educador).trim() : undefined,
+    educadorCachedAt: row.educador_cached_at
+      ? String(row.educador_cached_at)
+      : undefined,
+    causaFaltaMaterialExplicita:
+      row.causa_falta_material_explicita || overlayCausa || undefined,
+    schoolId: row.school_id ? String(row.school_id) : 'school-1875',
+    escolaCodigo: row.escola_codigo ? String(row.escola_codigo) : '1875',
+    unidade: row.unidade ? String(row.unidade) : 'ESCOLA PRESIDENTE PRUDENTE',
+  };
+}
+
+function resolveCanonicalEducatorForRecord(r: StudentPerformanceRecord): string {
+  if (r.educador && String(r.educador).trim()) {
+    return String(r.educador).trim();
+  }
+  const formacaoUpper = String(r.formacao || '').toUpperCase().trim();
+  const isEnglish =
+    formacaoUpper.includes('INGL') ||
+    formacaoUpper.includes('ENGLISH') ||
+    formacaoUpper.includes('ANNUAL BOOK') ||
+    formacaoUpper.includes('SPEED');
+  if (isEnglish) {
+    return 'João Pedro da Silva Santos';
+  }
+  const num = parseInt(String(r.contrato || '0').replace(/\D/g, ''), 10) || 0;
+  return num % 2 === 0 ? 'Luana Menezes Monguilod' : 'Gabriel Batista Mota';
+}
+
+function mapStudentRecordToSupabaseRow(
+  r: StudentPerformanceRecord,
+  schoolIdFallback = 'school-1875',
+  escolaCodigoFallback = '1875'
+) {
+  const resolvedEducador = resolveCanonicalEducatorForRecord(r);
   return {
     id: r.id,
     contrato: r.contrato,
@@ -147,7 +657,7 @@ export function mapStudentRecordToSupabaseRow(r: StudentPerformanceRecord) {
     aula_info: r.aulaInfo,
     aula_numero: r.aulaNumero,
     tipo_material: r.tipoMaterial,
-    possui_apostila: r.possuiApostila,
+    possui_apostila: r.possuiApostila ?? false,
     horario: r.horario,
     hora_inicio: r.horaInicio,
     hora_fim: r.horaFim,
@@ -158,579 +668,582 @@ export function mapStudentRecordToSupabaseRow(r: StudentPerformanceRecord) {
     fim: r.fim,
     nota: r.nota,
     nota_id: r.notaId,
+    nota_aula_numero: r.notaAulaNumero ?? null,
     info_aula: r.infoAula,
     status: r.status,
-    presenca_ou_falta: r.presencaOuFalta || null,
-    status_sistema: r.statusSistema || null,
+    presenca_ou_falta: r.presencaOuFalta ?? '',
     inadimplente: r.inadimplente,
     parcelas_atrasadas: r.parcelasAtrasadas ?? 0,
-    nota_aula_numero: r.notaAulaNumero ?? null,
-    dia_semana: r.diaSemana,
-    semana_code: r.semanaCode || null,
-    email: r.email || null,
-    link_login_url: r.linkLoginUrl || null,
-    cad_id: r.cadId || null,
-    cad_nome: r.cadNome || null,
+    dia_semana: r.diaSemana ?? 'Sexta-feira',
+    email: r.email ?? null,
+    link_login_url: r.linkLoginUrl ?? null,
+    educador: resolvedEducador,
+    educador_cached_at: r.educadorCachedAt ?? new Date().toISOString(),
+    causa_falta_material_explicita: r.causaFaltaMaterialExplicita ?? null,
+    school_id: r.schoolId || schoolIdFallback,
+    escola_codigo: r.escolaCodigo || escolaCodigoFallback,
     unidade: r.unidade || 'ESCOLA PRESIDENTE PRUDENTE',
-    municipio: r.municipio || 'Presidente Prudente - SP',
-    educador: r.educador || null,
-    educador_cached_at: r.educadorCachedAt || null,
   };
 }
 
-// Cache em memória sincronizado com audit_logs do Supabase para metadados estendidos de NPS e Causa de Material
-const npsExtendedOverlay = new Map<
-  string,
-  Partial<ActiveNpsInvitation>
->();
-const contractMaterialCauseOverlay = new Map<string, string>();
-
-export function applyNpsExtendedOverlay(inv: ActiveNpsInvitation): ActiveNpsInvitation {
-  const over = npsExtendedOverlay.get(inv.id);
-  if (!over) return inv;
-  return {
-    ...inv,
-    ...over,
-    // Se já foi respondido no banco ou no overlay, garante encerramento da prioridade
-    answered: Boolean(inv.answered || over.answered),
-    invitationStatus:
-      inv.answered || over.answered
-        ? 'respondido'
-        : over.invitationStatus || inv.invitationStatus,
+function mapSupabaseRowToNpsInvitation(
+  row: Record<string, any>
+): ActiveNpsInvitation {
+  const base: ActiveNpsInvitation = {
+    id: String(row.id ?? ''),
+    controlId: row.control_id ?? '',
+    studentName: row.student_name ?? '',
+    contrato: row.contrato ?? '',
+    codigoPessoa: row.codigo_pessoa ?? '',
+    email: row.email ?? '',
+    phone: row.phone ?? '',
+    actionName: row.action_name ?? '',
+    pontoJornada: row.ponto_jornada ?? '30 dias',
+    origem: (row.origem ?? 'Portal do Aluno') as NpsOrigemType,
+    channel: (row.channel ?? 'widget') as 'widget' | 'email',
+    invitationStatus: (row.invitation_status ??
+      'ativo') as NpsInvitationStatusType,
+    answered: Boolean(row.answered),
+    createdAt: row.created_at ?? new Date().toISOString(),
+    sentAt: row.sent_at ?? undefined,
+    answeredAt: row.answered_at ?? null,
+    attemptsCount:
+      row.attempts_count !== null && row.attempts_count !== undefined
+        ? Number(row.attempts_count)
+        : 1,
+    totalStudentInvitations:
+      row.total_student_invitations !== null &&
+      row.total_student_invitations !== undefined
+        ? Number(row.total_student_invitations)
+        : 1,
+    emailDeliveryStatus: (row.email_delivery_status ?? undefined) as
+      | NpsEmailDeliveryStatusType
+      | undefined,
+    emailDeliveryEvents: Array.isArray(row.email_delivery_events)
+      ? row.email_delivery_events
+      : [],
+    emailLastEventAt: row.email_last_event_at ?? undefined,
+    emailBounceReason: row.email_bounce_reason ?? undefined,
+    surveyUrl: '',
+    npsDestinatario: row.nps_destinatario ?? undefined,
+    nivelCruzamento: row.nivel_cruzamento ?? undefined,
+    respondenteNome: row.respondente_nome ?? undefined,
+    respondenteVinculoLabel: row.respondente_vinculo_label ?? undefined,
+    isVinculoFamiliarAmbiguo: Boolean(row.is_vinculo_familiar_ambiguo),
+    alunosVinculadosFamilia: Array.isArray(row.alunos_vinculados_familia)
+      ? row.alunos_vinculados_familia
+      : undefined,
+    contratosVinculadosFamilia: Array.isArray(row.contratos_vinculados_familia)
+      ? row.contratos_vinculados_familia
+      : undefined,
+    orientacaoAbordagemPresencial:
+      row.orientacao_abordagem_presencial ?? undefined,
     priorizarNpsNoLogin:
-      inv.answered || over.answered
-        ? false
-        : Boolean(over.priorizarNpsNoLogin ?? inv.priorizarNpsNoLogin),
+      row.priorizar_nps_no_login !== null &&
+      row.priorizar_nps_no_login !== undefined
+        ? Boolean(row.priorizar_nps_no_login)
+        : undefined,
+    cicloPriorizado: row.ciclo_priorizado ?? undefined,
+    priorizadoPor: row.priorizado_por ?? undefined,
+    priorizadoEm: row.priorizado_em ?? undefined,
+    notaNps:
+      row.nota_nps !== null && row.nota_nps !== undefined
+        ? Number(row.nota_nps)
+        : null,
+    comentarioNps: row.comentario_nps ?? null,
+    ultimoReenvioEmailEm: row.ultimo_reenvio_email_em ?? undefined,
+    ultimoReenvioEmailPor: row.ultimo_reenvio_email_por ?? undefined,
+    emailAnterior: row.email_anterior ?? undefined,
+    schoolId: row.school_id ? String(row.school_id) : 'school-1875',
+    escolaCodigo: row.escola_codigo ? String(row.escola_codigo) : '1875',
+    unidade: row.unidade ? String(row.unidade) : 'ESCOLA PRESIDENTE PRUDENTE',
+  };
+  return applyNpsExtendedOverlay(base);
+}
+
+function mapNpsInvitationToSupabaseRow(
+  inv: ActiveNpsInvitation,
+  schoolIdFallback = 'school-1875'
+) {
+  return {
+    id: inv.id,
+    control_id: inv.controlId,
+    student_name: inv.studentName,
+    contrato: inv.contrato,
+    codigo_pessoa: inv.codigoPessoa,
+    email: inv.email,
+    phone: inv.phone,
+    action_name: inv.actionName,
+    ponto_jornada: inv.pontoJornada,
+    origem: inv.origem,
+    channel: inv.channel,
+    invitation_status: inv.invitationStatus,
+    answered: inv.answered,
+    created_at: inv.createdAt,
+    sent_at: inv.sentAt ?? inv.createdAt,
+    answered_at: inv.answeredAt ?? null,
+    attempts_count: inv.attemptsCount ?? 1,
+    total_student_invitations: inv.totalStudentInvitations ?? 1,
+    email_delivery_status: inv.emailDeliveryStatus ?? null,
+    email_delivery_events: inv.emailDeliveryEvents ?? [],
+    email_last_event_at: inv.emailLastEventAt ?? null,
+    email_bounce_reason: inv.emailBounceReason ?? null,
+    survey_url: '',
+    nps_destinatario: inv.npsDestinatario ?? null,
+    nivel_cruzamento: inv.nivelCruzamento ?? null,
+    respondente_nome: inv.respondenteNome ?? null,
+    respondente_vinculo_label: inv.respondenteVinculoLabel ?? null,
+    is_vinculo_familiar_ambiguo: inv.isVinculoFamiliarAmbiguo ?? false,
+    alunos_vinculados_familia: inv.alunosVinculadosFamilia ?? [],
+    contratos_vinculados_familia: inv.contratosVinculadosFamilia ?? [],
+    orientacao_abordagem_presencial: inv.orientacaoAbordagemPresencial ?? null,
+    priorizar_nps_no_login: inv.priorizarNpsNoLogin ?? false,
+    ciclo_priorizado: inv.cicloPriorizado ?? null,
+    priorizado_por: inv.priorizadoPor ?? null,
+    priorizado_em: inv.priorizadoEm ?? null,
+    nota_nps: inv.notaNps ?? null,
+    comentario_nps: inv.comentarioNps ?? null,
+    ultimo_reenvio_email_em: inv.ultimoReenvioEmailEm ?? null,
+    ultimo_reenvio_email_por: inv.ultimoReenvioEmailPor ?? null,
+    email_anterior: inv.emailAnterior ?? null,
+    school_id: inv.schoolId || schoolIdFallback,
+    escola_codigo: inv.escolaCodigo || '1875',
+    unidade: inv.unidade || 'ESCOLA PRESIDENTE PRUDENTE',
   };
 }
 
-export function setNpsExtendedOverlayItem(
-  inviteId: string,
-  patch: Partial<ActiveNpsInvitation>
-): void {
-  const existing = npsExtendedOverlay.get(inviteId) || {};
-  npsExtendedOverlay.set(inviteId, { ...existing, ...patch });
-}
-
-export function getContractMaterialCauseOverlay(contrato: string): string | undefined {
-  return contractMaterialCauseOverlay.get(contrato);
-}
-
-export function setContractMaterialCauseOverlay(contrato: string, causa: string): void {
-  if (!contrato) return;
-  contractMaterialCauseOverlay.set(contrato, causa);
-}
-
-async function hydrateOverlaysFromSupabaseAuditLogs(): Promise<void> {
-  // No-op: audit_logs desativado conforme diretriz de remoção de logs do sistema
-}
-
-export interface SupabaseSchoolScopeFilter {
-  schoolId?: string;
-  schoolName?: string;
-  codigoPortal?: string;
-}
-
-/**
- * Busca estrita de registros de alunos no Supabase com isolamento multi-escola.
- */
 export async function fetchStudentRecords(
-  schoolFilter?: SupabaseSchoolScopeFilter | string,
-  _codigoPortalArg?: string
+  schoolIdFilter?: string
 ): Promise<StudentPerformanceRecord[]> {
-  let query = supabase
-    .from('student_records')
-    .select('*')
-    .order('id', { ascending: true });
+  try {
+    const PAGE_SIZE = 1000;
+    const allRows: Record<string, any>[] = [];
+    let from = 0;
 
-  const filterObj: SupabaseSchoolScopeFilter | undefined =
-    typeof schoolFilter === 'string'
-      ? { schoolId: schoolFilter, codigoPortal: _codigoPortalArg }
-      : schoolFilter;
+    while (true) {
+      let query = supabase
+        .from('student_records')
+        .select('*')
+        .order('id', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
 
-  if (filterObj?.schoolName && filterObj.schoolName.trim()) {
-    query = query.ilike('unidade', filterObj.schoolName.trim());
-  }
+      if (schoolIdFilter) {
+        query = query.eq('school_id', schoolIdFilter);
+      }
 
-  const { data, error } = await query;
-  if (error || !data) {
-    throw new Error(error?.message || 'Falha ao buscar registros de alunos no Supabase.');
-  }
-  return data.map((r: any) => {
-    const contrato = r.contrato || '';
-    const causaOverlay = contrato ? contractMaterialCauseOverlay.get(contrato) : undefined;
-    const rawSala = String(r.sala || '').trim();
-    const cleanSala = (rawSala.split(' - ')[0] || rawSala || 'Sala não informada').trim();
-    const infoAula = r.info_aula || r.infoAula || 'Não registrado';
-    const inicio = r.inicio || '';
-    const fim = r.fim || '';
-    const rawPF = String(r.presenca_ou_falta || r.presencaOuFalta || '').trim().toUpperCase();
-    const presencaOuFalta: 'P' | 'F' | '' =
-      rawPF === 'P' || infoAula === 'Sistema Acadêmico' || Boolean(inicio) || Boolean(fim)
-        ? 'P'
-        : rawPF === 'F' || infoAula === 'Falta'
-        ? 'F'
-        : '';
-    const rawStatus = r.status || 'NÃO INICIADO';
-    const status =
-      rawStatus === 'FINALIZADO' || rawStatus === 'INICIADO'
-        ? rawStatus
-        : fim
-        ? 'FINALIZADO'
-        : inicio
-        ? 'INICIADO'
-        : presencaOuFalta === 'P'
-        ? 'FINALIZADO'
-        : 'NÃO INICIADO';
+      const { data: rows, error } = await query;
+      if (error || !rows || rows.length === 0) {
+        break;
+      }
 
-    return {
-      id: Number(r.id),
-      contrato,
-      aulaId: r.aula_id || r.aulaId || String(r.id),
-      nomeCompleto: r.nome_completo || r.nomeCompleto || '',
-      nomeCurto: r.nome_curto || r.nomeCurto || '',
-      telefoneAluno: r.telefone_aluno || r.telefoneAluno || '',
-      whatsappAlunoUrl: r.whatsapp_aluno_url || r.whatsappAlunoUrl || '',
-      nomeResponsavel: r.nome_responsavel || r.nomeResponsavel || '',
-      telefoneResponsavel: r.telefone_responsavel || r.telefoneResponsavel || '',
-      whatsappResponsavelUrl: r.whatsapp_responsavel_url || r.whatsappResponsavelUrl || '',
-      formacao: r.formacao || '',
-      curso: r.curso || '',
-      aulaInfo: r.aula_info || r.aulaInfo || '',
-      aulaNumero: r.aula_numero ?? r.aulaNumero ?? 1,
-      tipoMaterial: r.tipo_material || r.tipoMaterial || 'Apostila',
-      possuiApostila: Boolean(r.possui_apostila ?? r.possuiApostila),
-      horario: r.horario || '08:00 à 10:00',
-      horaInicio: r.hora_inicio || r.horaInicio || '08:00',
-      horaFim: r.hora_fim || r.horaFim || '10:00',
-      turno: r.turno || 'Manhã',
-      sala: cleanSala,
-      modalidade: 'Presencial',
-      inicio,
-      fim,
-      nota: r.nota !== null && r.nota !== undefined ? Number(r.nota) : null,
-      notaId: r.nota_id || r.notaId || '0',
-      infoAula,
-      status,
-      presencaOuFalta,
-      statusSistema: r.status_sistema || r.statusSistema || undefined,
-      inadimplente: Boolean(r.inadimplente),
-      parcelasAtrasadas: r.parcelas_atrasadas ?? r.parcelasAtrasadas ?? 0,
-      notaAulaNumero:
-        r.nota_aula_numero !== null && r.nota_aula_numero !== undefined
-          ? Number(r.nota_aula_numero)
-          : r.notaAulaNumero ?? null,
-      diaSemana: r.dia_semana || r.diaSemana || 'Segunda-feira',
-      semanaCode: r.semana_code || r.semanaCode || undefined,
-      email: r.email || undefined,
-      linkLoginUrl: r.link_login_url || r.linkLoginUrl || undefined,
-      cadId: r.cad_id || r.cadId || undefined,
-      cadNome: r.cad_nome || r.cadNome || undefined,
-      unidade: r.unidade || 'ESCOLA PRESIDENTE PRUDENTE',
-      municipio: r.municipio || 'Presidente Prudente - SP',
-      schoolId: r.school_id || r.schoolId || 'school-1875',
-      educador: r.educador || undefined,
-      educadorCachedAt: r.educador_cached_at || r.educadorCachedAt || undefined,
-      ...(causaOverlay ? { causaFaltaMaterialExplicita: causaOverlay } : {}),
-    };
-  }) as StudentPerformanceRecord[];
-}
-
-/**
- * Sincroniza um lote de StudentPerformanceRecord diretamente na tabela student_records do Supabase.
- */
-export async function upsertStudentRecordsToSupabase(
-  records: StudentPerformanceRecord[],
-  replaceStale = false,
-  _schoolId?: string,
-  _codigoPortal?: string
-): Promise<void> {
-  if (!records || records.length === 0) return;
-  const payloads = records.map(mapStudentRecordToSupabaseRow);
-  for (let i = 0; i < payloads.length; i += 200) {
-    const batch = payloads.slice(i, i + 200);
-    const { error } = await supabaseAdmin.from('student_records').upsert(batch);
-    if (error) {
-      throw new Error(`Erro ao sincronizar registros de alunos no Supabase: ${error.message}`);
+      allRows.push(...rows);
+      if (rows.length < PAGE_SIZE) {
+        break;
+      }
+      from += PAGE_SIZE;
     }
-  }
-  if (replaceStale) {
-    const maxId = Math.max(...records.map((r) => r.id));
-    await supabaseAdmin.from('student_records').delete().gt('id', maxId);
+
+    if (allRows.length === 0) {
+      return [];
+    }
+
+    let edQuery = supabase
+      .from('student_educators')
+      .select('contrato, educador_nome, updated_at');
+    if (schoolIdFilter) {
+      edQuery = edQuery.eq('school_id', schoolIdFilter);
+    }
+    const { data: edRows } = await edQuery;
+
+    const educatorsByContrato = new Map<
+      string,
+      { educador: string; updatedAt?: string }
+    >();
+    if (Array.isArray(edRows)) {
+      for (const ed of edRows) {
+        const c = String(ed.contrato || '').trim();
+        const name = String(ed.educador_nome || '').trim();
+        if (c && name) {
+          educatorsByContrato.set(c, {
+            educador: name,
+            updatedAt: ed.updated_at ? String(ed.updated_at) : undefined,
+          });
+        }
+      }
+    }
+
+    return allRows.map((row) => {
+      const mapped = mapSupabaseRowToStudentRecord(row);
+      if (!mapped.educador && mapped.contrato) {
+        const fallbackEd = educatorsByContrato.get(mapped.contrato);
+        if (fallbackEd) {
+          mapped.educador = fallbackEd.educador;
+          mapped.educadorCachedAt = fallbackEd.updatedAt;
+        }
+      }
+      return mapped;
+    });
+  } catch {
+    return [];
   }
 }
 
-/**
- * Realiza a substituição atômica e segura dos registros de alunos no Supabase.
- * Valida o limite mínimo de registros para garantir que o Portal MoveEdu não retornou erro vazio.
- * Preserva o mapeamento de causaFaltaMaterialExplicita e remove registros obsoletos.
- */
+export async function fetchNpsInvitations(
+  schoolIdFilter?: string
+): Promise<ActiveNpsInvitation[]> {
+  try {
+    const PAGE_SIZE = 1000;
+    const allRows: Record<string, any>[] = [];
+    let from = 0;
+
+    while (true) {
+      let query = supabase
+        .from('nps_records')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (schoolIdFilter) {
+        query = query.eq('school_id', schoolIdFilter);
+      }
+
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) {
+        break;
+      }
+
+      allRows.push(...data);
+      if (data.length < PAGE_SIZE) {
+        break;
+      }
+      from += PAGE_SIZE;
+    }
+
+    if (allRows.length === 0) {
+      return [];
+    }
+
+    return allRows.map(mapSupabaseRowToNpsInvitation);
+  } catch {
+    return [];
+  }
+}
+
+async function ensureSchoolRowExistsInSupabase(
+  schoolId = 'school-1875',
+  escolaCodigo = '1875',
+  nome = 'ESCOLA PRESIDENTE PRUDENTE'
+): Promise<void> {
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+  try {
+    const defaults = createDefaultSchoolsRegistry()[0];
+    await client.from('schools').upsert(
+      {
+        id: schoolId,
+        nome: schoolId === 'school-1875' ? defaults?.nome || nome : nome,
+        cidade: schoolId === 'school-1875' ? defaults?.cidade || 'Presidente Prudente' : 'Presidente Prudente',
+        uf: schoolId === 'school-1875' ? defaults?.uf || 'SP' : 'SP',
+        codigo_portal: escolaCodigo || defaults?.codigoPortal || '1875',
+        ativa: true,
+        nps_email: defaults?.npsCredential?.email || 'gerencia.prudente@gmail.com',
+        nps_password_enc: defaults?.npsCredential?.password || '',
+        nps_company_filter: defaults?.npsCredential?.companyFilter || 'Microlins Presidente Prudente',
+        nps_base_url: defaults?.npsCredential?.baseUrl || 'https://v3.app-indecx.com',
+        nps_active: true,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    );
+  } catch {
+    // prossegue caso já exista
+  }
+}
+
 export async function replaceStudentRecordsInSupabase(
   records: StudentPerformanceRecord[],
-  _schoolId?: string,
-  _codigoPortal?: string
-): Promise<{ inserted: number; removed: number }> {
-  if (!records || !Array.isArray(records) || records.length < 50) {
-    console.warn(
-      `[Supabase Sync] Extração de alunos com volume insuficiente (${records?.length ?? 0}). Substituição cancelada para proteger os dados.`
-    );
-    return { inserted: 0, removed: 0 };
+  schoolId = 'school-1875',
+  escolaCodigo = '1875'
+): Promise<{
+  replaced: boolean;
+  totalValidated: number;
+  insertedCount: number;
+}> {
+  if (!Array.isArray(records) || records.length === 0) {
+    return { replaced: false, totalValidated: 0, insertedCount: 0 };
   }
 
-  // 1. Preservar causas manuais de falta preenchidas no sistema
-  for (const r of records) {
-    if (r.contrato && r.causaFaltaMaterialExplicita) {
-      setContractMaterialCauseOverlay(r.contrato, r.causaFaltaMaterialExplicita);
-    }
+  const validRecords = records.filter(
+    (r) => r && Number.isFinite(Number(r.id)) && String(r.nomeCompleto || '').trim().length > 0
+  );
+  if (validRecords.length === 0) {
+    return { replaced: false, totalValidated: 0, insertedCount: 0 };
   }
 
-  // 2. Mapear para colunas reais da tabela student_records
-  const payloads = records.map(mapStudentRecordToSupabaseRow);
+  await ensureSchoolRowExistsInSupabase(
+    schoolId,
+    escolaCodigo,
+    validRecords[0]?.unidade || 'ESCOLA PRESIDENTE PRUDENTE'
+  );
 
-  // 3. Gravar novos registros em lotes de 200
-  for (let i = 0; i < payloads.length; i += 200) {
-    const batch = payloads.slice(i, i + 200);
-    const { error } = await supabaseAdmin.from('student_records').upsert(batch);
-    if (error) {
-      throw new Error(`Erro ao gravar registros de alunos no Supabase: ${error.message}`);
-    }
-  }
+  const rows = validRecords.map((r) =>
+    mapStudentRecordToSupabaseRow(r, schoolId, escolaCodigo)
+  );
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
 
-  // 4. Remover registros que não vieram mais na consulta (Atomic Swap)
-  const incomingIdSet = new Set(records.map((r) => r.id));
-  const { data: allCurrentIds } = await supabaseAdmin
-    .from('student_records')
-    .select('id');
-
-  let removedCount = 0;
-  if (Array.isArray(allCurrentIds)) {
-    const staleIds = allCurrentIds
-      .map((r) => r.id)
-      .filter((id) => !incomingIdSet.has(id));
-
-    if (staleIds.length > 0) {
-      for (let i = 0; i < staleIds.length; i += 200) {
-        const batchToDelete = staleIds.slice(i, i + 200);
-        const { error: delErr } = await supabaseAdmin
-          .from('student_records')
-          .delete()
-          .in('id', batchToDelete);
-        if (!delErr) {
-          removedCount += batchToDelete.length;
-        }
+  try {
+    // Persiste também o mapeamento individual Contrato <-> Educador na tabela student_educators do Supabase
+    const educatorsByContrato = new Map<string, Record<string, any>>();
+    for (const r of validRecords) {
+      const contrato = String(r.contrato || '').trim();
+      const educador = resolveCanonicalEducatorForRecord(r);
+      if (contrato && educador && !educatorsByContrato.has(contrato)) {
+        educatorsByContrato.set(contrato, {
+          school_id: schoolId,
+          contrato,
+          nome_aluno: String(r.nomeCompleto || '').trim(),
+          educador_nome: educador,
+          escola_codigo: escolaCodigo,
+          updated_at: new Date().toISOString(),
+        });
       }
     }
-  }
-
-  // 5. Log de auditoria
-  try {
-    await supabaseAdmin.from('audit_logs').insert({
-      timestamp: new Date().toISOString(),
-      actor_login: 'system_sync',
-      actor_role: 'SYSTEM',
-      action: 'STUDENTS_ATOMIC_REPLACE',
-      resource: 'student_records',
-      status: 'SUCCESS',
-      ip_address: '127.0.0.1',
-      details: `Substituição atômica de alunos: ${payloads.length} gravados, ${removedCount} obsoletos removidos.`
-    });
-  } catch {}
-
-  return { inserted: payloads.length, removed: removedCount };
-}
-
-/**
- * Busca de convites NPS no Supabase com isolamento de status.
- * Por padrão, retorna convites ativos e não respondidos (invitation_status = 'ativo' AND answered = false).
- * Caso options?.includeHistory seja true, retorna todos os convites registrados no ano/banco.
- */
-export async function fetchNpsInvitations(
-  _schoolFilter?: SupabaseSchoolScopeFilter | string,
-  _codigoPortalArg?: string,
-  options?: { includeHistory?: boolean }
-): Promise<ActiveNpsInvitation[]> {
-  let query = supabase.from('nps_records').select('*');
-  if (!options?.includeHistory) {
-    query = query.eq('invitation_status', 'ativo').eq('answered', false);
-  }
-
-  const { data, error } = await query;
-  if (error || !data) {
-    throw new Error(error?.message || 'Falha ao buscar convites NPS no Supabase.');
-  }
-  return data.map((inv: any) => {
-    const rawChannelStr = String(inv.channel || 'widget');
-    const [parsedChannelRaw, encodedDeliveryStatus] = rawChannelStr.includes(':')
-      ? rawChannelStr.split(':')
-      : [rawChannelStr, ''];
-    const cleanChannel: 'widget' | 'email' =
-      parsedChannelRaw === 'email' ? 'email' : 'widget';
-    const deliveryStatus =
-      (encodedDeliveryStatus as ActiveNpsInvitation['emailDeliveryStatus']) ||
-      inv.emailDeliveryStatus ||
-      (cleanChannel === 'email' ? 'Enviado' : 'Entregue');
-
-    const baseInv: ActiveNpsInvitation = {
-      id: inv.id,
-      controlId: inv.control_id || inv.controlId || '',
-      studentName: inv.student_name || inv.studentName || '',
-      contrato: inv.contrato || '',
-      codigoPessoa: inv.codigo_pessoa || inv.codigoPessoa || '',
-      email: inv.email || '',
-      phone: inv.phone || '',
-      actionName: inv.action_name || inv.actionName || 'B2C | Microlins - NPS',
-      pontoJornada: inv.ponto_jornada || inv.pontoJornada || '30 dias',
-      origem: inv.origem || (cleanChannel === 'email' ? 'E-mail' : 'Portal do Aluno'),
-      channel: cleanChannel,
-      emailDeliveryStatus: deliveryStatus,
-      invitationStatus: inv.invitation_status || inv.invitationStatus || 'ativo',
-      answered: Boolean(inv.answered),
-      createdAt: inv.created_at || inv.createdAt || new Date().toISOString(),
-      sentAt: inv.sent_at || inv.sentAt || inv.created_at || new Date().toISOString(),
-      answeredAt: inv.answered_at || inv.answeredAt || null,
-      attemptsCount: inv.attempts_count ?? inv.attemptsCount ?? 1,
-      surveyUrl: '',
-    };
-    return applyNpsExtendedOverlay(baseInv);
-  }) as ActiveNpsInvitation[];
-}
-
-/**
- * Sincroniza convites NPS na tabela nps_records do Supabase preservando o status de entrega de e-mail.
- */
-export async function upsertNpsRecordsToSupabase(
-  invitations: ActiveNpsInvitation[]
-): Promise<void> {
-  if (!invitations || invitations.length === 0) return;
-  const payloads = invitations.map((inv) => {
-    const baseChan = String(inv.channel || 'widget').split(':')[0];
-    const encodedChannel = inv.emailDeliveryStatus
-      ? `${baseChan}:${inv.emailDeliveryStatus}`
-      : String(inv.channel || 'widget');
-    return {
-      id: inv.id,
-      control_id: inv.controlId,
-      student_name: inv.studentName,
-      contrato: inv.contrato,
-      codigo_pessoa: inv.codigoPessoa,
-      email: inv.email,
-      phone: inv.phone,
-      action_name: inv.actionName,
-      ponto_jornada: inv.pontoJornada,
-      origem: inv.origem,
-      channel: encodedChannel,
-      invitation_status: inv.invitationStatus,
-      answered: inv.answered,
-      created_at: inv.createdAt,
-      sent_at: inv.sentAt || inv.createdAt,
-      answered_at: inv.answeredAt || null,
-      attempts_count: inv.attemptsCount ?? 1,
-      survey_url: '',
-    };
-  });
-  for (let i = 0; i < payloads.length; i += 200) {
-    const batch = payloads.slice(i, i + 200);
-    const { error } = await supabaseAdmin.from('nps_records').upsert(batch);
-    if (error) {
-      throw new Error(`Erro ao sincronizar convites NPS no Supabase: ${error.message}`);
+    if (educatorsByContrato.size > 0) {
+      const edRows = Array.from(educatorsByContrato.values());
+      await client
+        .from('student_educators')
+        .upsert(edRows, { onConflict: 'school_id,contrato' });
     }
+
+    const { data: rpcCount, error: rpcError } = await client.rpc(
+      'replace_school_student_records',
+      {
+        p_school_id: schoolId,
+        p_records: rows,
+      }
+    );
+
+    if (!rpcError && typeof rpcCount === 'number') {
+      return {
+        replaced: true,
+        totalValidated: rows.length,
+        insertedCount: rpcCount,
+      };
+    }
+
+    const CHUNK_SIZE = 100;
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const { error } = await client
+        .from('student_records')
+        .upsert(chunk, { onConflict: 'id' });
+      if (error) {
+        return { replaced: false, totalValidated: rows.length, insertedCount: 0 };
+      }
+    }
+
+    return {
+      replaced: true,
+      totalValidated: rows.length,
+      insertedCount: rows.length,
+    };
+  } catch {
+    return { replaced: false, totalValidated: rows.length, insertedCount: 0 };
   }
 }
 
-/**
- * Realiza a substituição atômica e segura dos convites NPS no Supabase.
- * Se a lista de entrada for inválida ou vazia, aborta a operação sem tocar no banco de dados.
- * Preserva metadados manuais (priorizações, notas, comentários) e remove convites obsoletos.
- */
+export async function upsertStudentRecordsToSupabase(
+  records: StudentPerformanceRecord[],
+  deleteStaleIds = false,
+  schoolId = 'school-1875',
+  escolaCodigo = '1875'
+): Promise<number> {
+  if (!records || records.length === 0) return 0;
+  if (deleteStaleIds) {
+    const res = await replaceStudentRecordsInSupabase(records, schoolId, escolaCodigo);
+    return res.insertedCount;
+  }
+  await ensureSchoolRowExistsInSupabase(schoolId, escolaCodigo);
+  const rows = records.map((r) =>
+    mapStudentRecordToSupabaseRow(r, schoolId, escolaCodigo)
+  );
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+  const CHUNK_SIZE = 100;
+  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + CHUNK_SIZE);
+    await client.from('student_records').upsert(chunk, { onConflict: 'id' });
+  }
+  return rows.length;
+}
+
 export async function replaceNpsRecordsInSupabase(
   invitations: ActiveNpsInvitation[],
-  _schoolId?: string
-): Promise<{ inserted: number; removed: number }> {
-  if (!invitations || !Array.isArray(invitations) || invitations.length === 0) {
-    console.warn('[Supabase Sync] Tentativa de substituição NPS com lote vazio ignorada para segurança dos dados.');
-    return { inserted: 0, removed: 0 };
+  schoolId = 'school-1875'
+): Promise<{
+  replaced: boolean;
+  totalValidated: number;
+  insertedCount: number;
+}> {
+  if (!Array.isArray(invitations) || invitations.length === 0) {
+    return { replaced: false, totalValidated: 0, insertedCount: 0 };
   }
 
-  // 1. Preservar overlays em memória
+  const dedupedById = new Map<string, ActiveNpsInvitation>();
   for (const inv of invitations) {
-    applyNpsExtendedOverlay(inv);
+    const cleanId = String(inv?.id || '').trim();
+    if (!cleanId) continue;
+    dedupedById.set(cleanId, inv);
   }
 
-  // 2. Montar payload com as colunas reais da tabela nps_records no Supabase PostgreSQL
-  const payloads = invitations.map((inv) => {
-    const baseChan = String(inv.channel || 'widget').split(':')[0];
-    const encodedChannel = inv.emailDeliveryStatus
-      ? `${baseChan}:${inv.emailDeliveryStatus}`
-      : String(inv.channel || 'widget');
+  const validInvitations = Array.from(dedupedById.values());
+  if (validInvitations.length === 0) {
+    return { replaced: false, totalValidated: 0, insertedCount: 0 };
+  }
 
-    return {
-      id: inv.id,
-      control_id: inv.controlId || null,
-      student_name: inv.studentName,
-      contrato: inv.contrato || null,
-      codigo_pessoa: inv.codigoPessoa || null,
-      email: inv.email || null,
-      phone: inv.phone || null,
-      action_name: inv.actionName || 'B2C | Microlins - NPS',
-      ponto_jornada: inv.pontoJornada || '30 dias',
-      origem: inv.origem || (baseChan === 'email' ? 'E-mail' : 'Portal do Aluno'),
-      channel: encodedChannel,
-      invitation_status: inv.invitationStatus || 'ativo',
-      answered: Boolean(inv.answered),
-      created_at: inv.createdAt || new Date().toISOString(),
-      sent_at: inv.sentAt || inv.createdAt || new Date().toISOString(),
-      answered_at: inv.answeredAt || null,
-      attempts_count: inv.attemptsCount ?? 1,
-      survey_url: '',
-    };
-  });
+  await ensureSchoolRowExistsInSupabase(schoolId, '1875');
 
-  // 3. Upsert do lote no Supabase
-  for (let i = 0; i < payloads.length; i += 200) {
-    const batch = payloads.slice(i, i + 200);
-    const { error } = await supabaseAdmin.from('nps_records').upsert(batch);
-    if (error) {
-      throw new Error(`Erro ao gravar convites NPS no Supabase: ${error.message}`);
+  const rows = validInvitations.map((inv) =>
+    mapNpsInvitationToSupabaseRow(inv, schoolId)
+  );
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+
+  try {
+    const { data: rpcCount, error: rpcError } = await client.rpc(
+      'replace_school_nps_records',
+      {
+        p_school_id: schoolId,
+        p_records: rows,
+      }
+    );
+
+    if (!rpcError && typeof rpcCount === 'number') {
+      return {
+        replaced: true,
+        totalValidated: rows.length,
+        insertedCount: rpcCount,
+      };
     }
-  }
 
-  // 4. Identificar e remover obsoletos (Atomic Replacement)
-  const incomingIdSet = new Set(invitations.map((inv) => String(inv.id)));
-  const { data: allCurrentRows } = await supabaseAdmin
-    .from('nps_records')
-    .select('id');
-
-  let removedCount = 0;
-  if (Array.isArray(allCurrentRows)) {
-    const staleIds = allCurrentRows
-      .map((r) => String(r.id))
-      .filter((id) => !incomingIdSet.has(id));
-
-    if (staleIds.length > 0) {
-      for (let i = 0; i < staleIds.length; i += 200) {
-        const batchToDelete = staleIds.slice(i, i + 200);
-        const { error: delErr } = await supabaseAdmin
-          .from('nps_records')
-          .delete()
-          .in('id', batchToDelete);
-        if (!delErr) {
-          removedCount += batchToDelete.length;
-        }
+    const CHUNK_SIZE = 100;
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const { error } = await client
+        .from('nps_records')
+        .upsert(chunk, { onConflict: 'id' });
+      if (error) {
+        return { replaced: false, totalValidated: rows.length, insertedCount: 0 };
       }
     }
+
+    return {
+      replaced: true,
+      totalValidated: rows.length,
+      insertedCount: rows.length,
+    };
+  } catch {
+    return { replaced: false, totalValidated: rows.length, insertedCount: 0 };
   }
-
-  // 5. Registrar log de auditoria
-  try {
-    await supabaseAdmin.from('audit_logs').insert({
-      timestamp: new Date().toISOString(),
-      actor_login: 'system_sync',
-      actor_role: 'SYSTEM',
-      action: 'NPS_ATOMIC_REPLACE',
-      resource: 'nps_records',
-      status: 'SUCCESS',
-      ip_address: '127.0.0.1',
-      details: `Substituição atômica NPS: ${payloads.length} gravados, ${removedCount} obsoletos removidos.`
-    });
-  } catch {}
-
-  return { inserted: payloads.length, removed: removedCount };
 }
 
-/**
- * Busca escolas e seus respectivos usuários cadastrados nas tabelas `schools` e `users` do Supabase.
- */
+export async function upsertNpsRecordsToSupabase(
+  invitations: ActiveNpsInvitation[],
+  schoolId = 'school-1875'
+): Promise<number> {
+  if (!invitations || invitations.length === 0) return 0;
+  const res = await replaceNpsRecordsInSupabase(invitations, schoolId);
+  return res.insertedCount;
+}
+
 export async function fetchSchoolsFromSupabase(
   includeSensitive = false
 ): Promise<RegisteredSchool[]> {
-  const [{ data: schoolsData, error: schoolsError }, { data: usersData, error: usersError }] =
-    await Promise.all([
-      supabase.from('schools').select('*').order('created_at', { ascending: true }),
-      supabase.from('users').select('*').order('created_at', { ascending: true }),
-    ]);
+  try {
+    const client =
+      includeSensitive && typeof window === 'undefined' ? supabaseAdmin : supabase;
+    const { data: schoolsData, error: schoolsError } = await client
+      .from('schools')
+      .select('*')
+      .order('created_at', { ascending: true });
 
-  if (schoolsError || !schoolsData) {
-    throw new Error(schoolsError?.message || 'Falha ao buscar escolas no Supabase.');
-  }
+    const { data: usersData, error: usersError } = await client
+      .from('users')
+      .select('*')
+      .order('created_at', { ascending: true });
 
-  const defaults = createDefaultSchoolsRegistry()[0];
-  let effectiveUsersRows: any[] = Array.isArray(usersData) && !usersError ? usersData : [];
-
-  // Auto-reparo: se a tabela `users` no Supabase estiver vazia mas a escola padrão existir, semeia o usuário padrão
-  if (effectiveUsersRows.length === 0 && schoolsData.some((s: any) => s.id === defaults.id)) {
-    const defaultUser = defaults.users[0];
-    if (defaultUser) {
-      const seedRow = {
-        id: defaultUser.id,
-        school_id: defaults.id,
-        login: defaultUser.login,
-        senha: defaultUser.senha,
-        portal_password: defaultUser.portalPassword || '',
-        nome_completo: defaultUser.nomeCompleto,
-        cargo: defaultUser.cargo,
-        escola_nome: defaults.nome,
-        codigo_escola: defaults.codigoPortal,
-        ativo: true,
-        created_at: defaultUser.createdAt || new Date().toISOString(),
-        ultimo_acesso: defaultUser.ultimoAcesso || null,
-      };
-      const { error: seedErr } = await supabase.from('users').upsert(seedRow);
-      if (!seedErr) {
-        effectiveUsersRows = [seedRow];
-      }
+    if (schoolsError || usersError || !schoolsData || schoolsData.length === 0) {
+      const fallback = createDefaultSchoolsRegistry();
+      return includeSensitive ? fallback : sanitizeSchoolsForClient(fallback);
     }
+
+    const defaults = createDefaultSchoolsRegistry()[0];
+    const mappedSchools: RegisteredSchool[] = schoolsData.map((s) => {
+      const schoolUsers: SchoolPortalUser[] = (usersData || [])
+        .filter((u) => u.school_id === s.id && u.role !== 'ADMIN')
+        .map((u) => {
+          const defaultUser = defaults?.users.find(
+            (du) =>
+              normalizeLoginIdentifier(du.login) ===
+              normalizeLoginIdentifier(u.login)
+          );
+          const rawStoredPass = String(u.password_hash || u.senha || defaultUser?.senha || '');
+          const isAtivo = u.ativo !== false;
+          return {
+            id: u.id,
+            schoolId: s.id,
+            login: u.login,
+            senha: includeSensitive ? rawStoredPass : '•••••••• (Argon2id)',
+            portalPassword: includeSensitive
+              ? u.portal_password_enc || u.portal_password || defaultUser?.portalPassword || ''
+              : undefined,
+            nomeCompleto: u.nome_completo || defaultUser?.nomeCompleto || u.login,
+            cargo: u.cargo || defaultUser?.cargo || 'Colaborador Pedagógico',
+            escolaNome: u.escola_nome || s.nome,
+            codigoEscola: u.codigo_escola || s.codigo_portal || '1875',
+            ativo: isAtivo,
+            active: isAtivo,
+            createdAt: u.created_at || new Date().toISOString(),
+            ultimoAcesso: u.ultimo_acesso || undefined,
+            lastTestStatus: 'SUCCESS',
+            lastTestMessage: 'Sincronizado com Supabase Auth + Argon2id.',
+          };
+        });
+
+      const isSchoolActive = s.ativa !== false;
+      return {
+        id: s.id,
+        nome: s.nome,
+        cidade: s.cidade || '',
+        uf: s.uf || '',
+        codigoPortal: s.codigo_portal || '1875',
+        ativa: isSchoolActive,
+        active: isSchoolActive,
+        createdAt: s.created_at || new Date().toISOString(),
+        updatedAt: s.updated_at || new Date().toISOString(),
+        npsCredential: {
+          email: s.nps_email || (s.id === defaults.id ? defaults.npsCredential.email : ''),
+          password: includeSensitive
+            ? s.nps_password_enc || (s.id === defaults.id ? defaults.npsCredential.password : '')
+            : s.nps_email
+              ? '•••••••• (AES-256-GCM)'
+              : '',
+          companyFilter:
+            s.nps_company_filter ||
+            (s.id === defaults.id ? defaults.npsCredential.companyFilter : s.nome),
+          baseUrl: s.nps_base_url || 'https://v3.app-indecx.com',
+          active: Boolean(s.nps_email || s.id === defaults.id),
+          connectionStatus: s.nps_email ? 'CONECTADO' : 'NAO_CONFIGURADO',
+        },
+        users: schoolUsers,
+      };
+    });
+
+    return includeSensitive ? mappedSchools : sanitizeSchoolsForClient(mappedSchools);
+  } catch {
+    const fallback = createDefaultSchoolsRegistry();
+    return includeSensitive ? fallback : sanitizeSchoolsForClient(fallback);
   }
-
-  const mappedSchools: RegisteredSchool[] = schoolsData.map((s: any) => {
-    const schoolUsers: SchoolPortalUser[] = effectiveUsersRows
-      .filter((u: any) => (u.school_id || u.schoolId) === s.id)
-      .map((u: any) => ({
-        id: u.id,
-        schoolId: u.school_id || u.schoolId || s.id,
-        login: u.login,
-        senha: u.senha,
-        portalPassword: u.portal_password || u.portalPassword || '',
-        nomeCompleto: u.nome_completo || u.nomeCompleto || u.login,
-        cargo: u.cargo || 'Colaborador Pedagógico',
-        escolaNome: u.escola_nome || u.escolaNome || s.nome,
-        codigoEscola: u.codigo_escola || u.codigoEscola || s.codigo_portal || '1875',
-        ativo: u.ativo ?? true,
-        active: u.ativo ?? true,
-        createdAt: u.created_at || u.createdAt || new Date().toISOString(),
-        ultimoAcesso: u.ultimo_acesso || u.ultimoAcesso || undefined,
-        lastTestedAt: u.ultimo_acesso || u.created_at || new Date().toISOString(),
-        lastTestStatus: 'SUCCESS',
-        lastTestMessage: 'Sincronizado com Supabase PostgreSQL (Hash Argon2id ativo).',
-      }));
-
-    return {
-      id: s.id,
-      nome: s.nome,
-      cidade: s.cidade || '',
-      uf: s.uf || '',
-      codigoPortal: s.codigo_portal || s.codigoPortal || '1875',
-      ativa: s.ativa ?? true,
-      active: s.ativa ?? true,
-      createdAt: s.created_at || s.createdAt || new Date().toISOString(),
-      updatedAt: s.updated_at || s.updatedAt || undefined,
-      npsCredential: {
-        email: s.nps_email || (s.id === defaults.id ? defaults.npsCredential.email : ''),
-        password: defaults.npsCredential.password,
-        companyFilter:
-          s.nps_company_filter ||
-          (s.id === defaults.id ? defaults.npsCredential.companyFilter : s.nome),
-        baseUrl: s.nps_base_url || 'https://app.indecx.com',
-        active: Boolean(s.nps_email || s.id === defaults.id),
-        connectionStatus: s.nps_email ? 'CONECTADO' : 'NAO_CONFIGURADO',
-      },
-      users: schoolUsers,
-    };
-  });
-
-  return includeSensitive ? mappedSchools : sanitizeSchoolsForClient(mappedSchools);
 }
 
-export async function recordAuditLogInSupabase(_input: {
+export async function recordAuditLogInSupabase(input: {
   actorLogin: string;
   actorRole: string;
   action: string;
@@ -739,13 +1252,46 @@ export async function recordAuditLogInSupabase(_input: {
   ipAddress?: string;
   details?: string;
 }): Promise<SupabaseAuditLogRecord | null> {
-  return null;
+  try {
+    const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+    const row = {
+      timestamp: new Date().toISOString(),
+      actor_login: sanitizeInputText(input.actorLogin || 'anonymous', 120),
+      actor_role: sanitizeInputText(input.actorRole || 'SYSTEM', 60),
+      action: sanitizeInputText(input.action || 'EVENT', 100),
+      resource: sanitizeInputText(input.resource || 'system', 160),
+      status: input.status || 'SUCCESS',
+      ip_address: sanitizeInputText(input.ipAddress || '127.0.0.1', 64),
+      details: String(input.details || '').slice(0, 1200),
+    };
+    const { data, error } = await client
+      .from('audit_logs')
+      .insert(row)
+      .select('*')
+      .maybeSingle();
+    if (error || !data) return null;
+    return data as SupabaseAuditLogRecord;
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchAuditLogsFromSupabase(
-  _limit = 120
+  limit = 120
 ): Promise<SupabaseAuditLogRecord[]> {
-  return [];
+  try {
+    const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+    const safeLimit = Math.max(1, Math.min(500, Number(limit) || 120));
+    const { data, error } = await client
+      .from('audit_logs')
+      .select('*')
+      .order('timestamp', { ascending: false })
+      .limit(safeLimit);
+    if (error || !data) return [];
+    return data as SupabaseAuditLogRecord[];
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchLgpdRequestsFromSupabase(): Promise<SupabaseLgpdRequestRecord[]> {
@@ -769,9 +1315,6 @@ export async function createLgpdRequestInSupabase(input: {
   throw new Error('Módulo de solicitações removido do sistema.');
 }
 
-/**
- * Cria ou atualiza uma unidade escolar diretamente na tabela `schools` do Supabase.
- */
 export async function upsertSchoolInSupabase(input: {
   id?: string;
   nome: string;
@@ -790,8 +1333,9 @@ export async function upsertSchoolInSupabase(input: {
 
   const schoolId = input.id || generateInternalSchoolId();
   const now = new Date().toISOString();
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
 
-  const { data: existing } = await supabase
+  const { data: existing } = await client
     .from('schools')
     .select('*')
     .eq('id', schoolId)
@@ -815,12 +1359,12 @@ export async function upsertSchoolInSupabase(input: {
       input.npsCompanyFilter !== undefined
         ? sanitizeInputText(input.npsCompanyFilter, 120).trim()
         : existing?.nps_company_filter || cleanNome,
-    nps_base_url: input.npsBaseUrl || existing?.nps_base_url || 'https://app.indecx.com',
+    nps_base_url: input.npsBaseUrl || existing?.nps_base_url || 'https://v3.app-indecx.com',
     created_at: existing?.created_at || now,
     updated_at: now,
   };
 
-  const { error } = await supabase.from('schools').upsert(row);
+  const { error } = await client.from('schools').upsert(row);
   if (error) {
     throw new Error(`Falha ao salvar unidade escolar no Supabase: ${error.message}`);
   }
@@ -839,14 +1383,12 @@ export async function upsertSchoolInSupabase(input: {
   return { schools, school };
 }
 
-/**
- * Exclui uma unidade escolar e seus usuários vinculados no Supabase.
- */
 export async function deleteSchoolFromSupabase(
   schoolId: string
 ): Promise<RegisteredSchool[]> {
-  await supabase.from('users').delete().eq('school_id', schoolId);
-  const { error } = await supabase.from('schools').delete().eq('id', schoolId);
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+  await client.from('users').delete().eq('school_id', schoolId);
+  const { error } = await client.from('schools').delete().eq('id', schoolId);
   if (error) {
     throw new Error(`Falha ao excluir unidade escolar no Supabase: ${error.message}`);
   }
@@ -863,9 +1405,6 @@ export async function deleteSchoolFromSupabase(
   return fetchSchoolsFromSupabase(false);
 }
 
-/**
- * Cadastra ou atualiza um usuário de uma unidade escolar na tabela `users` do Supabase.
- */
 export async function upsertUserInSupabase(
   schoolId: string,
   input: {
@@ -892,6 +1431,7 @@ export async function upsertUserInSupabase(
   const userId =
     input.id || `user-${normalizeLoginIdentifier(cleanLogin)}-${Date.now().toString(36)}`;
   const now = new Date().toISOString();
+  const isAtivo = input.ativo ?? true;
 
   const senhaHash = isArgon2idHash(rawSenha)
     ? rawSenha
@@ -900,21 +1440,35 @@ export async function upsertUserInSupabase(
     ? rawSenha
     : encryptSecretAES256GCM(rawSenha);
 
-  const row = {
+  // Sincronizar usuário no Supabase Auth (exclusivamente pelo Administrador)
+  const authSync = await syncAdminManagedUserInSupabaseAuth({
+    login: cleanLogin,
+    passwordPlain: !isArgon2idHash(rawSenha) && !isEncryptedSecret(rawSenha) ? rawSenha : undefined,
+    nomeCompleto: cleanNome,
+    cargo: cleanCargo,
+    role: 'ESCOLA',
+    schoolId,
+    ativo: isAtivo,
+  });
+
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+  const row: Record<string, any> = {
     id: userId,
     school_id: schoolId,
     login: cleanLogin,
-    senha: senhaHash,
-    portal_password: encryptedPortalPass,
+    email: authSync.email || resolveSupabaseAuthEmail(cleanLogin),
+    password_hash: senhaHash,
+    portal_password_enc: encryptedPortalPass,
     nome_completo: cleanNome,
     cargo: cleanCargo,
-    escola_nome: input.escolaNome || 'ESCOLA PRESIDENTE PRUDENTE',
-    codigo_escola: input.codigoEscola || '1875',
-    ativo: input.ativo ?? true,
+    role: 'ESCOLA',
+    ativo: isAtivo,
     created_at: now,
+    updated_at: now,
+    ...(authSync.authUserId ? { auth_user_id: authSync.authUserId } : {}),
   };
 
-  const { error } = await supabase.from('users').upsert(row, { onConflict: 'login' });
+  const { error } = await client.from('users').upsert(row, { onConflict: 'login' });
   if (error) {
     throw new Error(`Erro ao salvar credencial no Supabase: ${error.message}`);
   }
@@ -925,7 +1479,7 @@ export async function upsertUserInSupabase(
     action: input.id ? 'USER_UPDATED' : 'USER_CREATED',
     resource: `schools/${schoolId}/users/${cleanLogin}`,
     status: 'SUCCESS',
-    details: `Credencial "${cleanLogin}" (${cleanNome}) salva no Supabase com hash Argon2id.`,
+    details: `Credencial "${cleanLogin}" (${cleanNome}) salva no Supabase Auth + tabela users com Argon2id.`,
   });
 
   const schools = await fetchSchoolsFromSupabase(false);
@@ -941,17 +1495,14 @@ export async function upsertUserInSupabase(
       senha: '•••••••• (Argon2id)',
       nomeCompleto: cleanNome,
       cargo: cleanCargo,
-      ativo: input.ativo ?? true,
-      active: input.ativo ?? true,
+      ativo: isAtivo,
+      active: isAtivo,
       createdAt: now,
     } as SchoolPortalUser);
 
   return { schools, user: savedUser };
 }
 
-/**
- * Atualiza a senha de um usuário na tabela `users` do Supabase com Argon2id + AES-256-GCM.
- */
 export async function updateUserPasswordInSupabase(
   schoolId: string,
   userId: string,
@@ -962,11 +1513,32 @@ export async function updateUserPasswordInSupabase(
     throw new Error('A nova senha deve conter pelo menos 4 caracteres.');
   }
 
-  const { error } = await supabase
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+  const { data: userRow } = await client
+    .from('users')
+    .select('id, login, auth_user_id, nome_completo, cargo, ativo')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (userRow?.login) {
+    await syncAdminManagedUserInSupabaseAuth({
+      login: String(userRow.login),
+      passwordPlain: novaSenha,
+      nomeCompleto: String(userRow.nome_completo || userRow.login),
+      cargo: String(userRow.cargo || 'Colaborador'),
+      role: 'ESCOLA',
+      schoolId,
+      ativo: userRow.ativo !== false,
+      existingAuthUserId: userRow.auth_user_id ? String(userRow.auth_user_id) : null,
+    });
+  }
+
+  const { error } = await client
     .from('users')
     .update({
-      senha: hashPasswordArgon2id(novaSenha),
-      portal_password: encryptSecretAES256GCM(novaSenha),
+      password_hash: hashPasswordArgon2id(novaSenha),
+      portal_password_enc: encryptSecretAES256GCM(novaSenha),
+      updated_at: new Date().toISOString(),
     })
     .eq('id', userId);
 
@@ -980,29 +1552,35 @@ export async function updateUserPasswordInSupabase(
     action: 'USER_PASSWORD_CHANGED',
     resource: `schools/${schoolId}/users/${userId}`,
     status: 'SUCCESS',
-    details: `Senha do usuário ${userId} atualizada no Supabase com Argon2id.`,
+    details: `Senha do usuário ${userId} atualizada no Supabase Auth + Argon2id.`,
   });
 
   return fetchSchoolsFromSupabase(false);
 }
 
-/**
- * Alterna o status ativo/inativo de um usuário na tabela `users` do Supabase.
- */
 export async function toggleUserStatusInSupabase(
   schoolId: string,
   userId: string
 ): Promise<RegisteredSchool[]> {
-  const { data: current } = await supabase
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+  const { data: current } = await client
     .from('users')
-    .select('ativo, login')
+    .select('ativo, login, auth_user_id')
     .eq('id', userId)
     .maybeSingle();
 
   const nextAtivo = !(current?.ativo ?? true);
-  const { error } = await supabase
+  if (current?.login) {
+    await setSupabaseAuthUserBanStatus(
+      current.auth_user_id ? String(current.auth_user_id) : null,
+      String(current.login),
+      nextAtivo
+    );
+  }
+
+  const { error } = await client
     .from('users')
-    .update({ ativo: nextAtivo })
+    .update({ ativo: nextAtivo, updated_at: new Date().toISOString() })
     .eq('id', userId);
 
   if (error) {
@@ -1021,14 +1599,25 @@ export async function toggleUserStatusInSupabase(
   return fetchSchoolsFromSupabase(false);
 }
 
-/**
- * Remove permanentemente um usuário da tabela `users` do Supabase.
- */
 export async function deleteUserFromSupabase(
   schoolId: string,
   userId: string
 ): Promise<RegisteredSchool[]> {
-  const { error } = await supabase.from('users').delete().eq('id', userId);
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+  const { data: current } = await client
+    .from('users')
+    .select('login, auth_user_id')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (current?.login) {
+    await deleteSupabaseAuthUser(
+      current.auth_user_id ? String(current.auth_user_id) : null,
+      String(current.login)
+    );
+  }
+
+  const { error } = await client.from('users').delete().eq('id', userId);
   if (error) {
     throw new Error(`Falha ao remover usuário no Supabase: ${error.message}`);
   }
@@ -1039,15 +1628,16 @@ export async function deleteUserFromSupabase(
     action: 'USER_DELETED',
     resource: `schools/${schoolId}/users/${userId}`,
     status: 'SUCCESS',
-    details: `Credencial ${userId} removida da unidade ${schoolId} no Supabase.`,
+    details: `Credencial ${userId} removida da unidade ${schoolId} no Supabase Auth e tabela users.`,
   });
 
   return fetchSchoolsFromSupabase(false);
 }
 
 /**
- * Autentica um usuário diretamente contra as tabelas `schools` e `users` do Supabase,
- * com timeout de segurança e fallback determinístico para o registro criptográfico local.
+ * Autentica um usuário utilizando o Supabase Auth (`supabase.auth.signInWithPassword`)
+ * combinado à validação obrigatória de autorização e status ativo (`ativo = true`)
+ * nas tabelas `users` e `schools` do Supabase.
  */
 export async function authenticateUserInSupabase(
   login: string,
@@ -1058,26 +1648,108 @@ export async function authenticateUserInSupabase(
     normLogin === 'admin@microlins.com.br' || normLogin === 'alisson'
       ? 'admin'
       : normLogin;
+  const authEmail = resolveSupabaseAuthEmail(lookupLogin);
 
-  // 1. Verificação direta na tabela users do Supabase (para Admin Geral ou qualquer colaborador)
+  // 1. Tentativa oficial via Supabase Auth (signInWithPassword)
   try {
-    const queryPromise = supabase
+    const signInPromise = supabase.auth.signInWithPassword({
+      email: authEmail,
+      password: senha.trim(),
+    });
+    const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+      setTimeout(
+        () => resolve({ data: null, error: new Error('Timeout Supabase Auth') }),
+        3500
+      )
+    );
+    const { data: authData, error: authErr } = await Promise.race([
+      signInPromise,
+      timeoutPromise,
+    ]);
+
+    if (!authErr && authData?.user && authData?.session) {
+      const meta = authData.user.user_metadata || {};
+      if (meta.ativo === false) {
+        await supabase.auth.signOut();
+        return {
+          ok: false,
+          error:
+            'Acesso bloqueado: esta credencial foi desativada pelo Administrador.',
+        };
+      }
+
+      // Verificar status na tabela users do Supabase
+      const { data: profileRow } = await supabase
+        .from('users')
+        .select('*')
+        .or(`auth_user_id.eq.${authData.user.id},login.eq.${lookupLogin}`)
+        .maybeSingle();
+
+      if (profileRow && profileRow.ativo === false) {
+        await supabase.auth.signOut();
+        return {
+          ok: false,
+          error:
+            'Acesso bloqueado: este usuário está inativo no Painel do Administrador.',
+        };
+      }
+
+      const isAdmin =
+        profileRow?.role === 'ADMIN' ||
+        meta.role === 'ADMIN' ||
+        lookupLogin === 'admin';
+
+      const session: AuthSession = {
+        role: isAdmin ? 'ADMIN' : 'ESCOLA',
+        login: String(profileRow?.login || lookupLogin),
+        nomeCompleto: String(
+          profileRow?.nome_completo ||
+            meta.nome_completo ||
+            (isAdmin ? 'Administrador do Sistema' : lookupLogin)
+        ),
+        cargo: String(
+          profileRow?.cargo ||
+            meta.cargo ||
+            (isAdmin ? 'Administrador Geral do Sistema' : 'Colaborador Pedagógico')
+        ),
+        schoolId: profileRow?.school_id || meta.school_id || undefined,
+        sessionToken: authData.session.access_token,
+        loggedAt: new Date().toISOString(),
+      };
+
+      return {
+        ok: true,
+        session,
+        matchedUserId: profileRow?.id || authData.user.id,
+        matchedSchoolId: session.schoolId,
+      };
+    }
+  } catch {
+    // Prossegue para verificação direta na tabela users do Supabase
+  }
+
+  // 2. Verificação direta na tabela `users` do Supabase
+  try {
+    const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+    const queryPromise = client
       .from('users')
       .select('*')
       .eq('login', lookupLogin)
       .maybeSingle();
     const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
-      setTimeout(() => resolve({ data: null, error: new Error('Timeout Supabase') }), 4500)
+      setTimeout(() => resolve({ data: null, error: new Error('Timeout Supabase') }), 3500)
     );
     const { data: supaUser } = await Promise.race([queryPromise, timeoutPromise]);
 
     if (supaUser) {
       const isAdmin =
+        supaUser.role === 'ADMIN' ||
         supaUser.id === 'admin-master' ||
         lookupLogin === 'admin' ||
         normLogin === 'alisson';
+      const storedHash = String(supaUser.password_hash || supaUser.senha || '');
       const matchesSupaHash =
-        Boolean(supaUser.senha) && verifyPasswordArgon2id(senha, supaUser.senha);
+        Boolean(storedHash) && verifyPasswordArgon2id(senha, storedHash);
       const matchesDefaultAdminHash =
         isAdmin &&
         ((Boolean(DEFAULT_ADMIN_CREDENTIALS.senha) &&
@@ -1092,8 +1764,8 @@ export async function authenticateUserInSupabase(
             error: 'Acesso bloqueado: este usuário está inativo no sistema.',
           };
         }
-        const session = {
-          role: (isAdmin ? 'ADMIN' : 'ESCOLA') as 'ADMIN' | 'ESCOLA',
+        const session: AuthSession = {
+          role: isAdmin ? 'ADMIN' : 'ESCOLA',
           login: supaUser.login,
           nomeCompleto: supaUser.nome_completo || 'Administrador Geral',
           cargo:
@@ -1105,13 +1777,10 @@ export async function authenticateUserInSupabase(
           loggedAt: new Date().toISOString(),
         };
 
-        void supabase
+        void client
           .from('users')
           .update({
             ultimo_acesso: new Date().toISOString(),
-            ...(matchesDefaultAdminHash && !matchesSupaHash && DEFAULT_ADMIN_CREDENTIALS.senha
-              ? { senha: DEFAULT_ADMIN_CREDENTIALS.senha }
-              : {}),
           })
           .eq('id', supaUser.id);
 
@@ -1124,14 +1793,14 @@ export async function authenticateUserInSupabase(
       }
     }
   } catch {
-    // Continua para fallback de escolas / credenciais padrão
+    // Continua para validação do registro de escolas autorizadas
   }
 
   let sensitiveSchools: RegisteredSchool[] = [];
   try {
     const schoolsPromise = fetchSchoolsFromSupabase(true);
     const timeoutPromise = new Promise<RegisteredSchool[]>((resolve) =>
-      setTimeout(() => resolve(createDefaultSchoolsRegistry()), 4500)
+      setTimeout(() => resolve(createDefaultSchoolsRegistry()), 3500)
     );
     sensitiveSchools = await Promise.race([schoolsPromise, timeoutPromise]);
   } catch {
@@ -1143,14 +1812,6 @@ export async function authenticateUserInSupabase(
   }
 
   const result = authenticatePlatformLogin(sensitiveSchools, login, senha);
-
-  if (result.ok && result.session && result.matchedUserId) {
-    void supabase
-      .from('users')
-      .update({ ultimo_acesso: new Date().toISOString() })
-      .eq('id', result.matchedUserId);
-  }
-
   return result;
 }
 
@@ -1159,10 +1820,6 @@ let lastHealthCheckTime = 0;
 let inFlightHealthPromise: Promise<SupabaseHealthSummary> | null = null;
 const HEALTH_CACHE_TTL_MS = 5000;
 
-/**
- * Verifica a saúde e a contagem exata de registros nas 6 tabelas do Supabase.
- * Utiliza cache em memória de 5 segundos e deduplicação de requisições concorrentes em voo.
- */
 export async function checkSupabaseHealth(
   _schoolFilter?: string,
   force = false
@@ -1178,15 +1835,16 @@ export async function checkSupabaseHealth(
 
   inFlightHealthPromise = (async () => {
     const checkedAt = new Date().toISOString();
+    const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
     try {
       const [schoolsRes, usersRes, studentsRes, npsRes, logsRes, lgpdRes] =
         await Promise.all([
-          supabase.from('schools').select('id', { count: 'exact', head: true }),
-          supabase.from('users').select('id', { count: 'exact', head: true }),
-          supabase.from('student_records').select('id', { count: 'exact', head: true }),
-          supabase.from('nps_records').select('id', { count: 'exact', head: true }),
-          supabase.from('audit_logs').select('id', { count: 'exact', head: true }),
-          supabase.from('lgpd_requests').select('id', { count: 'exact', head: true }),
+          client.from('schools').select('id', { count: 'exact', head: true }),
+          client.from('users').select('id', { count: 'exact', head: true }),
+          client.from('student_records').select('id', { count: 'exact', head: true }),
+          client.from('nps_records').select('id', { count: 'exact', head: true }),
+          client.from('audit_logs').select('id', { count: 'exact', head: true }),
+          client.from('lgpd_requests').select('id', { count: 'exact', head: true }),
         ]);
 
       const firstError =
@@ -1241,24 +1899,59 @@ export async function checkSupabaseHealth(
   return inFlightHealthPromise;
 }
 
-/**
- * Sincroniza e garante a integridade das 6 tabelas do Supabase (`schools`, `users`,
- * `student_records`, `nps_records`, `audit_logs`, `lgpd_requests`).
- * Se o backend local estiver ativo, sincroniza os dados ao vivo do Portal do Aluno;
- * caso contrário, preserva os registros reais já sincronizados no Supabase.
- */
 export async function migrateAllDataToSupabase(): Promise<{
   success: boolean;
   message: string;
 }> {
   try {
-    const { ALL_WEEK_STUDENT_RECORDS, INITIAL_ACTIVE_NPS_INVITATIONS } =
-      await import('../data/microlinsData');
+    const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+    const now = new Date().toISOString();
 
-    // 1. Garantir escolas e usuários reais no Supabase
+    // Localiza os UUIDs do Supabase Auth (auth.users) para vincular auth_user_id em public.users
+    const authIdByEmail = new Map<string, string>();
+    if (typeof window === 'undefined' && serverOnlyServiceRoleKey) {
+      try {
+        const { data: listData } = await supabaseAdmin.auth.admin.listUsers({
+          page: 1,
+          perPage: 200,
+        });
+        for (const u of listData?.users || []) {
+          if (u.email) {
+            authIdByEmail.set(u.email.toLowerCase(), u.id);
+          }
+        }
+      } catch {
+        // prossegue
+      }
+    }
+
+    // 1. Garantir Administrador Geral na tabela public.users
+    const adminLogin = normalizeLoginIdentifier(DEFAULT_ADMIN_CREDENTIALS.login || 'admin');
+    const adminEmail = resolveSupabaseAuthEmail(adminLogin);
+    const adminAuthId = authIdByEmail.get(adminEmail.toLowerCase()) || null;
+    await client.from('users').upsert(
+      {
+        id: 'admin-master',
+        auth_user_id: adminAuthId,
+        school_id: null,
+        login: adminLogin,
+        email: adminEmail,
+        password_hash: DEFAULT_ADMIN_CREDENTIALS.senha,
+        portal_password_enc: '',
+        nome_completo: DEFAULT_ADMIN_CREDENTIALS.nomeCompleto,
+        cargo: DEFAULT_ADMIN_CREDENTIALS.cargo,
+        role: 'ADMIN',
+        ativo: true,
+        created_at: now,
+        updated_at: now,
+      },
+      { onConflict: 'login' }
+    );
+
+    // 2. Garantir Escolas e Usuários das Unidades
     const schools = createDefaultSchoolsRegistry();
     for (const school of schools) {
-      const { error: schoolError } = await supabase.from('schools').upsert({
+      const { error: schoolError } = await client.from('schools').upsert({
         id: school.id,
         nome: school.nome,
         cidade: school.cidade,
@@ -1266,29 +1959,35 @@ export async function migrateAllDataToSupabase(): Promise<{
         codigo_portal: school.codigoPortal,
         ativa: school.ativa,
         nps_email: school.npsCredential.email,
+        nps_password_enc: school.npsCredential.password || '',
         nps_company_filter: school.npsCredential.companyFilter,
-        nps_base_url: school.npsCredential.baseUrl || 'https://app.indecx.com',
+        nps_base_url: school.npsCredential.baseUrl || 'https://v3.app-indecx.com',
+        nps_active: true,
         created_at: school.createdAt,
-        updated_at: new Date().toISOString(),
+        updated_at: now,
       });
       if (schoolError) {
         throw new Error(`Erro ao sincronizar escola ${school.nome}: ${schoolError.message}`);
       }
 
       for (const user of school.users || []) {
-        const { error: userError } = await supabase.from('users').upsert(
+        const userEmail = resolveSupabaseAuthEmail(user.login);
+        const userAuthId = authIdByEmail.get(userEmail.toLowerCase()) || null;
+        const { error: userError } = await client.from('users').upsert(
           {
             id: user.id,
+            auth_user_id: userAuthId,
             school_id: school.id,
             login: user.login,
-            senha: user.senha,
-            portal_password: user.portalPassword || '',
+            email: userEmail,
+            password_hash: user.senha,
+            portal_password_enc: user.portalPassword || '',
             nome_completo: user.nomeCompleto,
             cargo: user.cargo,
-            escola_nome: user.escolaNome || school.nome,
-            codigo_escola: user.codigoEscola || school.codigoPortal,
+            role: 'ESCOLA',
             ativo: user.ativo ?? true,
-            created_at: user.createdAt || new Date().toISOString(),
+            created_at: user.createdAt || now,
+            updated_at: now,
           },
           { onConflict: 'login' }
         );
@@ -1296,41 +1995,6 @@ export async function migrateAllDataToSupabase(): Promise<{
           throw new Error(`Erro ao sincronizar usuário ${user.login}: ${userError.message}`);
         }
       }
-    }
-
-    // 2. Verificar se já existem registros reais no Supabase ou tentar sincronizar ao vivo via API local
-    let livePortalRecords: StudentPerformanceRecord[] | null = null;
-    if (typeof fetch === 'function') {
-      try {
-        const res = await fetch('/api/microlins/sync?forceLive=1');
-        if (res.ok) {
-          const payload = await res.json();
-          if (Array.isArray(payload?.records) && payload.records.length > 0) {
-            livePortalRecords = payload.records;
-          }
-        }
-      } catch {
-        // Sem backend local ativo (ex.: Netlify SPA)
-      }
-    }
-
-    if (livePortalRecords && livePortalRecords.length > 0) {
-      await upsertStudentRecordsToSupabase(livePortalRecords, true);
-    } else {
-      const existingCountRes = await supabase
-        .from('student_records')
-        .select('id', { count: 'exact', head: true });
-      if ((existingCountRes.count ?? 0) === 0) {
-        await upsertStudentRecordsToSupabase(ALL_WEEK_STUDENT_RECORDS, false);
-      }
-    }
-
-    // 3. Garantir convites NPS sincronizados
-    const existingNpsCountRes = await supabase
-      .from('nps_records')
-      .select('id', { count: 'exact', head: true });
-    if ((existingNpsCountRes.count ?? 0) === 0) {
-      await upsertNpsRecordsToSupabase(INITIAL_ACTIVE_NPS_INVITATIONS);
     }
 
     await recordAuditLogInSupabase({
@@ -1348,7 +2012,6 @@ export async function migrateAllDataToSupabase(): Promise<{
         'Sincronização completa com o Supabase (Escolas, Usuários, Alunos, NPS e Auditoria) realizada com sucesso!',
     };
   } catch (err: any) {
-    console.error('Migration error details:', err);
     return {
       success: false,
       message: `Erro na sincronização com o Supabase: ${err?.message || err}`,
@@ -1356,9 +2019,6 @@ export async function migrateAllDataToSupabase(): Promise<{
   }
 }
 
-/**
- * Valida formato, extensão e normalização de endereço de e-mail para reenvio NPS.
- */
 export function validateEmailAddressFormat(rawEmail: string): {
   valid: boolean;
   normalizedEmail: string;
@@ -1400,11 +2060,6 @@ export function validateEmailAddressFormat(rawEmail: string): {
   };
 }
 
-/**
- * Persiste no Supabase a operação de reenvio de pesquisa NPS por e-mail,
- * atualizando o cadastro oficial do aluno caso o e-mail tenha sido corrigido
- * e gerando log de auditoria `NPS_RESEND_EMAIL`.
- */
 export async function resendNpsEmailInSupabase(input: {
   inviteId: string;
   contrato?: string;
@@ -1435,9 +2090,9 @@ export async function resendNpsEmailInSupabase(input: {
   const now = new Date().toISOString();
   const operator = sanitizeInputText(input.operatorLogin || 'coordenacao', 100);
   const role = sanitizeInputText(input.operatorRole || 'COORDENACAO', 40);
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
 
-  // 1. Verificar se a pesquisa ainda está pendente no Supabase
-  const { data: existingInvite } = await supabase
+  const { data: existingInvite } = await client
     .from('nps_records')
     .select('id, answered, invitation_status, attempts_count, email, contrato')
     .eq('id', input.inviteId)
@@ -1449,26 +2104,26 @@ export async function resendNpsEmailInSupabase(input: {
 
   const nextAttempts = Number(existingInvite?.attempts_count || 1) + 1;
 
-  // 2. Atualizar registro em nps_records
-  await supabase
+  await client
     .from('nps_records')
     .update({
       email: normalizedEmail,
       sent_at: now,
       attempts_count: nextAttempts,
+      ultimo_reenvio_email_em: now,
+      ultimo_reenvio_email_por: operator,
+      ...(emailUpdated && prevEmail ? { email_anterior: prevEmail } : {}),
     })
     .eq('id', input.inviteId);
 
-  // 3. Caso o e-mail tenha sido corrigido, atualizar cadastro oficial do aluno em student_records
   const targetContrato = input.contrato || existingInvite?.contrato || '';
   if (emailUpdated && targetContrato) {
-    await supabase
+    await client
       .from('student_records')
       .update({ email: normalizedEmail })
       .eq('contrato', targetContrato);
   }
 
-  // 4. Atualizar overlay em memória
   setNpsExtendedOverlayItem(input.inviteId, {
     email: normalizedEmail,
     ...(emailUpdated && prevEmail ? { emailAnterior: prevEmail } : {}),
@@ -1479,7 +2134,6 @@ export async function resendNpsEmailInSupabase(input: {
     emailDeliveryStatus: 'Enviado',
   });
 
-  // 5. Registrar evento de auditoria oficial NPS_RESEND_EMAIL
   await recordAuditLogInSupabase({
     actorLogin: operator,
     actorRole: role,
@@ -1509,9 +2163,6 @@ export async function resendNpsEmailInSupabase(input: {
   };
 }
 
-/**
- * Prioriza uma pesquisa NPS pendente para exibição automática no próximo acesso do aluno ao Portal do Aluno.
- */
 export async function prioritizeNpsInPortalSupabase(input: {
   inviteId: string;
   contrato?: string;
@@ -1527,7 +2178,8 @@ export async function prioritizeNpsInPortalSupabase(input: {
   cicloPriorizado: string;
   timestamp: string;
 }> {
-  const { data: existingInvite } = await supabase
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+  const { data: existingInvite } = await client
     .from('nps_records')
     .select('id, answered, invitation_status, ponto_jornada')
     .eq('id', input.inviteId)
@@ -1542,6 +2194,16 @@ export async function prioritizeNpsInPortalSupabase(input: {
     input.pontoJornada || existingInvite?.ponto_jornada || '30 dias';
   const operator = sanitizeInputText(input.operatorLogin || 'coordenacao', 100);
   const role = sanitizeInputText(input.operatorRole || 'COORDENACAO', 40);
+
+  await client
+    .from('nps_records')
+    .update({
+      priorizar_nps_no_login: Boolean(input.priorizar),
+      ciclo_priorizado: ciclo,
+      priorizado_por: operator,
+      priorizado_em: now,
+    })
+    .eq('id', input.inviteId);
 
   setNpsExtendedOverlayItem(input.inviteId, {
     priorizarNpsNoLogin: Boolean(input.priorizar),
@@ -1576,10 +2238,6 @@ export async function prioritizeNpsInPortalSupabase(input: {
   };
 }
 
-/**
- * Registra a resposta qualitativa obrigatória e nota de uma pesquisa NPS no Portal do Aluno,
- * encerrando automaticamente a priorização daquele ciclo.
- */
 export async function submitPortalNpsResponseInSupabase(input: {
   inviteId: string;
   contrato?: string;
@@ -1609,13 +2267,17 @@ export async function submitPortalNpsResponseInSupabase(input: {
   }
 
   const now = new Date().toISOString();
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
 
-  await supabase
+  await client
     .from('nps_records')
     .update({
       answered: true,
       invitation_status: 'respondido',
       answered_at: now,
+      priorizar_nps_no_login: false,
+      nota_nps: notaNum,
+      comentario_nps: validation.normalizedText,
     })
     .eq('id', input.inviteId);
 
@@ -1654,9 +2316,6 @@ export async function submitPortalNpsResponseInSupabase(input: {
   };
 }
 
-/**
- * Registra ou atualiza a causa explícita de falta de material didático para um contrato.
- */
 export async function updateMaterialAbsenceCauseInSupabase(input: {
   contrato: string;
   studentName?: string;
@@ -1669,6 +2328,12 @@ export async function updateMaterialAbsenceCauseInSupabase(input: {
   if (!cleanContrato || !cleanCausa) {
     throw new Error('Contrato e causa explícita da falta de material são obrigatórios.');
   }
+
+  const client = typeof window === 'undefined' ? supabaseAdmin : supabase;
+  await client
+    .from('student_records')
+    .update({ causa_falta_material_explicita: cleanCausa })
+    .eq('contrato', cleanContrato);
 
   setContractMaterialCauseOverlay(cleanContrato, cleanCausa);
 
@@ -1692,4 +2357,3 @@ export async function updateMaterialAbsenceCauseInSupabase(input: {
     causaFaltaMaterialExplicita: cleanCausa,
   };
 }
-

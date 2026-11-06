@@ -79,8 +79,8 @@ export const PORTAL_METADATA = {
   usuarioNomeCompleto: "Coordenação Pedagógica",
   usuarioCargo: "Auxiliar Pedagógico",
   portalUrl: "https://portaldoaluno.microlins.com.br/login/",
-  dataReferencia: "30/10/2026",
-  horaExtracao: "20:30:00",
+  dataReferencia: "06/11/2026",
+  horaExtracao: "07:00:00",
   diaSemana: "Sexta-feira",
   versaoPortal: "2026.07.21.6"
 };
@@ -148,72 +148,8 @@ export interface ActiveNpsInvitation {
   unidade?: string;
 }
 
-function loadRecordsFromServerSqlite(): {
-  students: StudentPerformanceRecord[];
-  nps: ActiveNpsInvitation[];
-  apostilas: Record<string, boolean>;
-} {
-  if (typeof process === "undefined") {
-    return { students: [], nps: [], apostilas: {} };
-  }
-  try {
-    const getBuiltin = (process as unknown as { getBuiltinModule?: (id: string) => any })
-      .getBuiltinModule;
-    if (!getBuiltin) return { students: [], nps: [], apostilas: {} };
-    const fs = getBuiltin("node:fs");
-    const path = getBuiltin("node:path");
-    const sqlite = getBuiltin("node:sqlite");
-    if (!fs || !path || !sqlite) return { students: [], nps: [], apostilas: {} };
-
-    const dbPath = path.resolve(process.cwd(), ".data", "microlins_production.sqlite");
-    if (!fs.existsSync(dbPath)) return { students: [], nps: [], apostilas: {} };
-
-    const db = new sqlite.DatabaseSync(dbPath, { open: true });
-    try {
-      const studentRows = db
-        .prepare("SELECT payload_json, educador FROM student_records WHERE school_id = 'school-1875' ORDER BY id ASC")
-        .all() as Array<{ payload_json: string; educador: string }>;
-      const students: StudentPerformanceRecord[] = [];
-      const apostilas: Record<string, boolean> = {};
-      for (const row of studentRows) {
-        try {
-          const parsed = JSON.parse(row.payload_json) as StudentPerformanceRecord;
-          if (!parsed.educador && row.educador) parsed.educador = row.educador;
-          students.push(parsed);
-          if (parsed.contrato && typeof parsed.possuiApostila === "boolean") {
-            apostilas[parsed.contrato] = parsed.possuiApostila;
-          }
-        } catch {}
-      }
-
-      const npsRows = db
-        .prepare("SELECT payload_json FROM nps_records WHERE school_id = 'school-1875' ORDER BY updated_at DESC")
-        .all() as Array<{ payload_json: string }>;
-      const nps: ActiveNpsInvitation[] = [];
-      for (const row of npsRows) {
-        try {
-          const parsed = JSON.parse(row.payload_json) as ActiveNpsInvitation;
-          parsed.surveyUrl = "";
-          nps.push(parsed);
-        } catch {}
-      }
-      return { students, nps, apostilas };
-    } finally {
-      try {
-        db.close();
-      } catch {}
-    }
-  } catch {
-    return { students: [], nps: [], apostilas: {} };
-  }
-}
-
-const serverDbSnapshot = loadRecordsFromServerSqlite();
-
 export const PORTAL_AUTH_LINKS_BY_CONTRATO: Record<string, string> = {};
-export const PORTAL_APOSTILA_BY_CONTRATO: Record<string, boolean> = serverDbSnapshot.apostilas;
-export const ALL_WEEK_STUDENT_RECORDS: StudentPerformanceRecord[] = serverDbSnapshot.students;
-export const INITIAL_STUDENT_RECORDS: StudentPerformanceRecord[] = ALL_WEEK_STUDENT_RECORDS.filter(
-  (r) => r.diaSemana === "Sexta-feira"
-);
-export const INITIAL_ACTIVE_NPS_INVITATIONS: ActiveNpsInvitation[] = serverDbSnapshot.nps;
+export const PORTAL_APOSTILA_BY_CONTRATO: Record<string, boolean> = {};
+export const ALL_WEEK_STUDENT_RECORDS: StudentPerformanceRecord[] = [];
+export const INITIAL_STUDENT_RECORDS: StudentPerformanceRecord[] = [];
+export const INITIAL_ACTIVE_NPS_INVITATIONS: ActiveNpsInvitation[] = [];

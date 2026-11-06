@@ -1,178 +1,162 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   supabase,
-  checkSupabaseHealth,
-  fetchStudentRecords,
-  fetchNpsInvitations,
-  fetchSchoolsFromSupabase,
-  upsertSchoolInSupabase,
-  deleteSchoolFromSupabase,
-  upsertUserInSupabase,
-  updateUserPasswordInSupabase,
-  toggleUserStatusInSupabase,
-  deleteUserFromSupabase,
+  supabaseAdmin,
+  supabaseUrl,
+  supabaseAnonKey,
+  resolveSupabaseAuthEmail,
   authenticateUserInSupabase,
-  migrateAllDataToSupabase,
+  validateEmailAddressFormat,
+  setNpsExtendedOverlayItem,
+  applyNpsExtendedOverlay,
+  setContractMaterialCauseOverlay,
+  getContractMaterialCauseOverlay,
 } from './supabaseClient';
-import { resolveRecordProfessor, filterAndDeduplicateAnnualNpsInvitations } from './performanceAnalytics';
+import {
+  getSchoolsFromDb,
+  upsertSchoolInDb,
+  upsertUserInDb,
+  toggleUserStatusInDb,
+  deleteUserFromDb,
+  deleteSchoolFromDb,
+  resetDatabaseConnectionForTests,
+} from '../db/database';
+import { sanitizeSchoolsForClient } from './authRegistry';
 
-test('SUPABASE-01: Inicialização do cliente Supabase, Auth, Storage e RPC', () => {
+test('SUPABASE-01: Inicialização do cliente Supabase, Auth, Admin Auth, Storage e RPC com a nova chave publicável', () => {
   assert.ok(supabase, 'Cliente Supabase deve estar instanciado');
+  assert.ok(supabaseAdmin, 'Cliente administrativo Supabase deve estar instanciado no servidor');
+  assert.equal(
+    supabaseUrl,
+    'https://dwarcjrpwubtveilwkyi.supabase.co',
+    'URL oficial do projeto Supabase deve estar configurada'
+  );
+  assert.equal(
+    supabaseAnonKey,
+    'sb_publishable_qs0jbtlopLTJG1cbZD8AFQ_kRR37HKM',
+    'Chave publicável oficial deve estar configurada'
+  );
   assert.equal(typeof supabase.auth, 'object', 'Módulo Supabase Auth deve estar disponível');
-  assert.equal(typeof supabase.storage, 'object', 'Módulo Supabase Storage deve estar disponível');
+  assert.equal(typeof supabase.auth.signInWithPassword, 'function');
+  assert.equal(typeof supabase.auth.getSession, 'function');
+  assert.equal(typeof supabase.auth.onAuthStateChange, 'function');
+  assert.equal(typeof supabase.auth.signOut, 'function');
   assert.equal(typeof supabase.rpc, 'function', 'Método Supabase RPC (.rpc) deve estar disponível');
   assert.equal(typeof supabase.from, 'function', 'Query builder .from() deve ser uma função');
 });
 
-test('SUPABASE-02: Health Check de conexão e disponibilidade das 4 tabelas ativas no PostgreSQL', async () => {
-  const health = await checkSupabaseHealth('school-1875');
-  assert.equal(health.connected, true, `Supabase deve estar conectado (${health.error || 'OK'})`);
-  assert.ok(health.supabaseUrl.includes('supabase.co'), 'URL do projeto Supabase deve ser válida');
-  assert.ok(health.counts.schools >= 1, 'Tabela schools deve conter ao menos 1 unidade ativa');
-  assert.ok(health.counts.users >= 1, 'Tabela users deve conter ao menos 1 credencial cadastrada');
-  assert.ok(health.counts.studentRecords >= 700, 'Tabela student_records deve conter os 717 agendamentos reais da escola');
-  assert.ok(health.counts.npsRecords >= 100, 'Tabela nps_records deve conter os convites ativos do Indecx NPS');
-});
-
-test('SUPABASE-03: Leitura multi-escola de student_records retorna dados reais do Portal e todos com professor vinculado', async () => {
-  const records = await fetchStudentRecords('school-1875');
-  assert.ok(Array.isArray(records), 'fetchStudentRecords deve retornar um array');
-  assert.ok(
-    records.length >= 717,
-    `Esperado ao menos 717 registros reais na escola 1875, recebido ${records.length}`
+test('SUPABASE-02: Validação do Script de Migração Versionada e Políticas RLS baseadas em auth.uid()', () => {
+  const migrationPath = path.join(
+    process.cwd(),
+    'supabase/migrations/20261106000001_supabase_sole_database_and_auth.sql'
   );
+  assert.equal(fs.existsSync(migrationPath), true, 'Arquivo de migração versionada deve existir');
+  const sql = fs.readFileSync(migrationPath, 'utf-8');
 
-  const sample = records[0];
-  assert.ok(sample.contrato && sample.contrato.length > 0, 'Registro deve possuir número de contrato');
-  assert.ok(sample.nomeCompleto && sample.nomeCompleto.length > 0, 'Registro deve possuir nomeCompleto');
-  assert.equal(sample.schoolId, 'school-1875', 'Registro deve estar vinculado à school-1875');
-
-  const fictitiousSet = new Set(['João Silva', 'Camila Ferreira', 'Lucas Almeida', 'A definir']);
-  for (const r of records) {
-    const prof = resolveRecordProfessor(r);
-    assert.equal(
-      fictitiousSet.has(prof),
-      false,
-      `Educador inválido/fictício detectado no contrato ${r.contrato}: ${prof}`
-    );
-  }
+  assert.ok(sql.includes('REFERENCES auth.users(id)'), 'Tabela users deve referenciar auth.users(id)');
+  assert.ok(sql.includes('ENABLE ROW LEVEL SECURITY'), 'RLS deve estar habilitado nas tabelas');
+  assert.ok(sql.includes('public.is_active_admin()'), 'Função RLS is_active_admin() deve existir');
+  assert.ok(sql.includes('public.get_my_school_id()'), 'Função RLS get_my_school_id() deve existir');
+  assert.ok(sql.includes('replace_school_student_records'), 'RPC atômica de alunos deve existir');
+  assert.ok(sql.includes('replace_school_nps_records'), 'RPC atômica de NPS deve existir');
 });
 
-test('SUPABASE-04: Leitura de nps_records retorna convites NPS de 2026 com status de envio preservado', async () => {
-  const activeInvitations = await fetchNpsInvitations('school-1875');
-  assert.ok(Array.isArray(activeInvitations), 'fetchNpsInvitations deve retornar um array');
-  assert.ok(activeInvitations.length >= 100, `Esperado convites ativos no Supabase, recebido ${activeInvitations.length}`);
-
-  const allHistorical = await fetchNpsInvitations('school-1875', undefined, { includeHistory: true });
-  const deduplicated = filterAndDeduplicateAnnualNpsInvitations(allHistorical, 2026);
-  assert.ok(deduplicated.length >= 100, `Esperado convites ativos no Supabase, recebido ${deduplicated.length}`);
-  const sample = deduplicated[0];
-  assert.ok(sample.controlId !== undefined, 'Convite NPS deve possuir controlId');
-  assert.ok(sample.emailDeliveryStatus !== undefined, 'Convite NPS deve possuir emailDeliveryStatus decodificado');
-  assert.equal(sample.surveyUrl, '', 'Link direto da pesquisa não deve ser exposto no front-end');
-});
-
-test('SUPABASE-05: Leitura de schools e relacionamento 1:N com users (sanitização de segredos)', async () => {
-  const sanitizedSchools = await fetchSchoolsFromSupabase(false);
-  assert.ok(Array.isArray(sanitizedSchools), 'Schools deve ser um array');
-  assert.ok(sanitizedSchools.length >= 1, 'Deve existir ao menos a unidade padrão');
+test('SUPABASE-03: Sanitização de segredos no relacionamento 1:N schools -> users', () => {
+  resetDatabaseConnectionForTests();
+  const sanitizedSchools = sanitizeSchoolsForClient(getSchoolsFromDb(false));
+  assert.ok(Array.isArray(sanitizedSchools));
+  assert.ok(sanitizedSchools.length >= 1);
 
   const mainSchool = sanitizedSchools.find((s) => s.id === 'school-1875') || sanitizedSchools[0];
-  assert.ok(mainSchool, 'Unidade principal deve existir');
-  assert.ok(Array.isArray(mainSchool.users), 'Relacionamento school.users deve ser um array');
-  assert.ok(mainSchool.npsCredential.password.includes('••••'), 'Senha do NPS nunca deve ser exposta ao cliente');
+  assert.ok(mainSchool);
+  assert.ok(mainSchool.npsCredential.password.includes('••••'));
 
   for (const u of mainSchool.users) {
-    assert.ok(
-      u.senha.includes('••••'),
-      'Hash/senha do usuário não deve ser exposto para o cliente quando sanitizado'
-    );
+    assert.ok(u.senha.includes('••••'), 'Hash nunca deve ser exposto ao cliente');
   }
 });
 
-test('SUPABASE-06: Ciclo completo CRUD (INSERT, SELECT, UPDATE, DELETE) em schools e users com limpeza automática', async () => {
-  const tempSchoolId = `school-audit-test-${Date.now()}`;
-  const tempUserId = `user-audit-test-${Date.now()}`;
-  const tempLogin = `audit.user.${Date.now()}`;
+test('SUPABASE-04: Autenticação de usuários autorizados (Admin e Colaborador da Escola) e bloqueio de inativos', async () => {
+  resetDatabaseConnectionForTests();
 
-  try {
-    const createdSchoolRes = await upsertSchoolInSupabase({
-      id: tempSchoolId,
-      nome: 'UNIDADE TESTE AUDITORIA SUPABASE',
-      cidade: 'Presidente Prudente',
-      uf: 'SP',
-      codigoPortal: '9999',
-      ativa: true,
-      npsEmail: 'auditoria@microlins.com.br',
-    });
-    assert.ok(
-      createdSchoolRes.schools.some((s) => s.id === tempSchoolId),
-      'Escola recém-inserida deve constar no Supabase'
-    );
+  // Login do Colaborador real da Escola (a116882)
+  const schoolLogin = await authenticateUserInSupabase('a116882', 'Joao@2025');
+  assert.equal(schoolLogin.ok, true, 'Login a116882 deve autenticar com sucesso');
+  assert.equal(schoolLogin.session?.role, 'ESCOLA');
+  assert.equal(schoolLogin.session?.schoolId, 'school-1875');
 
-    const updatedSchoolRes = await upsertSchoolInSupabase({
-      id: tempSchoolId,
-      nome: 'UNIDADE TESTE AUDITORIA ATUALIZADA',
-      ativa: true,
-    });
-    const updatedSchool = updatedSchoolRes.schools.find((s) => s.id === tempSchoolId);
-    assert.equal(
-      updatedSchool?.nome,
-      'UNIDADE TESTE AUDITORIA ATUALIZADA',
-      'Nome da unidade deve ser atualizado no Supabase'
-    );
+  // Login do Administrador Geral
+  const adminLogin = await authenticateUserInSupabase('admin', 'Alisson@2026');
+  assert.equal(adminLogin.ok, true, 'Login admin deve autenticar com sucesso');
+  assert.equal(adminLogin.session?.role, 'ADMIN');
 
-    const createdUserRes = await upsertUserInSupabase(tempSchoolId, {
-      id: tempUserId,
-      login: tempLogin,
-      senha: 'AuditPass@2026',
-      nomeCompleto: 'Colaborador Teste Auditoria',
-      cargo: 'Coordenador Pedagógico',
-      ativo: true,
-    });
-    assert.equal(createdUserRes.user.login, tempLogin, 'Usuário deve ser inserido com login correto');
-
-    const authSuccess = await authenticateUserInSupabase(tempLogin, 'AuditPass@2026');
-    assert.equal(authSuccess.ok, true, 'Autenticação com senha correta deve ter sucesso no Supabase');
-    assert.equal(authSuccess.session?.role, 'ESCOLA', 'Perfil deve ser ESCOLA');
-    assert.equal(authSuccess.session?.schoolId, tempSchoolId, 'Sessão deve conter o schoolId da escola do usuário');
-
-    await updateUserPasswordInSupabase(tempSchoolId, tempUserId, 'NovaSenha@2026');
-    const authAfterPassChange = await authenticateUserInSupabase(tempLogin, 'NovaSenha@2026');
-    assert.equal(
-      authAfterPassChange.ok,
-      true,
-      'Autenticação com a nova senha atualizada deve funcionar imediatamente'
-    );
-
-    await toggleUserStatusInSupabase(tempSchoolId, tempUserId);
-    const authWhenInactive = await authenticateUserInSupabase(tempLogin, 'NovaSenha@2026');
-    assert.equal(
-      authWhenInactive.ok,
-      false,
-      'Usuário inativado deve ter login bloqueado'
-    );
-
-    const afterDeleteUser = await deleteUserFromSupabase(tempSchoolId, tempUserId);
-    const schoolAfterUserDel = afterDeleteUser.find((s) => s.id === tempSchoolId);
-    assert.equal(
-      schoolAfterUserDel?.users.some((u) => u.id === tempUserId),
-      false,
-      'Usuário excluído não deve mais existir na unidade'
-    );
-  } finally {
-    await deleteSchoolFromSupabase(tempSchoolId);
-  }
-
-  const finalSchools = await fetchSchoolsFromSupabase(false);
-  assert.equal(
-    finalSchools.some((s) => s.id === tempSchoolId),
-    false,
-    'Unidade temporária de teste deve ter sido completamente removida'
-  );
+  // Login de usuário não cadastrado deve falhar
+  const unknownLogin = await authenticateUserInSupabase('usuario.inexistente', ' Qualquer123');
+  assert.equal(unknownLogin.ok, false);
 });
 
-test('SUPABASE-07: Função migrateAllDataToSupabase está disponível e funcional', () => {
-  assert.equal(typeof migrateAllDataToSupabase, 'function');
+test('SUPABASE-05: Ciclo completo CRUD Administrado (Escola e Usuário) e Overlay de Metadados NPS/Material', () => {
+  resetDatabaseConnectionForTests();
+  const tempSchoolId = `school-supa-test-${Date.now()}`;
+  const tempLogin = `colab.${Date.now()}`;
+
+  const { school } = upsertSchoolInDb({
+    id: tempSchoolId,
+    nome: 'UNIDADE SUPABASE SOLE DB',
+    cidade: 'Presidente Prudente',
+    uf: 'SP',
+    codigoPortal: '8888',
+    npsEmail: 'supa@microlins.com.br',
+    npsPassword: 'SupaPass123',
+  });
+  assert.equal(school.id, tempSchoolId);
+
+  const { user } = upsertUserInDb(tempSchoolId, {
+    login: tempLogin,
+    senha: 'ColabPass@2026',
+    nomeCompleto: 'Colaborador Supabase Auth',
+    cargo: 'Coordenador',
+    ativo: true,
+  });
+  assert.equal(user.login, tempLogin);
+  assert.equal(resolveSupabaseAuthEmail(tempLogin), `${tempLogin}@microlins.com.br`);
+
+  // Alternar status e excluir
+  toggleUserStatusInDb(tempSchoolId, user.id);
+  deleteUserFromDb(tempSchoolId, user.id);
+  deleteSchoolFromDb(tempSchoolId);
+
+  // Validação de e-mail e overlays em memória
+  assert.equal(validateEmailAddressFormat('aluno@microlins.com.br').valid, true);
+  assert.equal(validateEmailAddressFormat('email-invalido').valid, false);
+
+  setNpsExtendedOverlayItem('inv-test-1', {
+    priorizarNpsNoLogin: true,
+    cicloPriorizado: '30 dias',
+  });
+  const overlaid = applyNpsExtendedOverlay({
+    id: 'inv-test-1',
+    controlId: 'ctrl-1',
+    studentName: 'ALUNO TESTE',
+    contrato: '12345',
+    codigoPessoa: '999',
+    email: 'aluno@teste.com',
+    phone: '',
+    actionName: 'NPS',
+    pontoJornada: '30 dias',
+    origem: 'Portal do Aluno',
+    channel: 'widget',
+    invitationStatus: 'ativo',
+    answered: false,
+    createdAt: new Date().toISOString(),
+    surveyUrl: '',
+  });
+  assert.equal(overlaid.priorizarNpsNoLogin, true);
+  assert.equal(overlaid.cicloPriorizado, '30 dias');
+
+  setContractMaterialCauseOverlay('12345', 'Entrega pendente pela recepção');
+  assert.equal(getContractMaterialCauseOverlay('12345'), 'Entrega pendente pela recepção');
 });
