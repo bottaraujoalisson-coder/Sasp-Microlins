@@ -836,4 +836,131 @@ describe('Reestruturação Visual, Otimização, Segurança e Correções de Ló
     assert.equal(compareWeekdayWithCurrent('Terça-feira', 'Terça-feira'), 'CURRENT_DAY');
     assert.equal(compareWeekdayWithCurrent('Quarta-feira', 'Terça-feira'), 'FUTURE_DAY');
   });
+
+  it('Validação 5: Aulas iniciadas adiantadas (ex.: agendada às 10:00 e iniciada às 09:50) contabilizam Presença e status INICIADO imediatamente e nunca viram Falta', () => {
+    const alunoAdiantado = makeStudentRecord({
+      id: 950,
+      contrato: '4887950',
+      nomeCompleto: 'Fabiana Soares De Oliveira',
+      diaSemana: 'Sexta-feira',
+      horaInicio: '10:00',
+      horaFim: '11:00',
+      horario: '10:00 à 11:00',
+      inicio: '06/11/26 09:50',
+      fim: '',
+      status: 'INICIADO',
+      presencaOuFalta: '',
+      infoAula: 'Portal do Aluno',
+    });
+
+    const colegaAindaNaoIniciou = makeStudentRecord({
+      id: 951,
+      contrato: '5099999',
+      nomeCompleto: 'Colega Das Dez',
+      diaSemana: 'Sexta-feira',
+      horaInicio: '10:00',
+      horaFim: '11:00',
+      horario: '10:00 à 11:00',
+      inicio: '',
+      fim: '',
+      status: 'NÃO INICIADO',
+      presencaOuFalta: '',
+      infoAula: 'Não registrado',
+    });
+
+    // 1. Avaliação às 09:50 (10 minutos antes do horário agendado 10:00)
+    const evalAt0950 = evaluateAllStudentsAttendance(
+      [alunoAdiantado, colegaAindaNaoIniciou],
+      9 * 60 + 50,
+      {},
+      [],
+      'Sexta-feira'
+    );
+    const fabiana0950 = evalAt0950.find((r) => r.id === 950)!;
+    const colega0950 = evalAt0950.find((r) => r.id === 951)!;
+
+    assert.equal(
+      fabiana0950.attendanceStatus,
+      'Presença',
+      'Aluno que iniciou às 09:50 uma aula das 10:00 já deve ter attendanceStatus === "Presença" às 09:50'
+    );
+    assert.equal(
+      fabiana0950.status,
+      'INICIADO',
+      'Aluno que iniciou às 09:50 deve manter status === "INICIADO" (nunca "NÃO INICIADO")'
+    );
+    assert.equal(
+      fabiana0950.presencaOuFalta,
+      'P',
+      'Aluno que iniciou adiantado deve ter presencaOuFalta === "P" preservado'
+    );
+    assert.equal(
+      fabiana0950.inicio,
+      '06/11/26 09:50',
+      'Horário de início 09:50 jamais deve ser apagado antes das 10:00'
+    );
+    assert.equal(
+      colega0950.attendanceStatus,
+      'Não iniciada',
+      'Colega das 10:00 que ainda não iniciou continua como "Não iniciada" às 09:50'
+    );
+
+    // 2. Se o registro avaliado às 09:50 for reavaliado às 10:20 (após os 15 min de tolerância das 10:00), NUNCA pode virar Falta!
+    const evalAt1020 = evaluateAllStudentsAttendance(
+      evalAt0950,
+      10 * 60 + 20,
+      {},
+      [],
+      'Sexta-feira'
+    );
+    const fabiana1020 = evalAt1020.find((r) => r.id === 950)!;
+    const colega1020 = evalAt1020.find((r) => r.id === 951)!;
+
+    assert.equal(
+      fabiana1020.attendanceStatus,
+      'Presença',
+      'Após passar das 10:15 (tolerância), o aluno que iniciou às 09:50 deve permanecer com Presença e nunca receber Falta'
+    );
+    assert.equal(
+      fabiana1020.status,
+      'INICIADO',
+      'Status deve permanecer INICIADO às 10:20 enquanto não finalizar'
+    );
+    assert.equal(
+      colega1020.attendanceStatus,
+      'Falta',
+      'Colega que não iniciou até 10:20 recebe Falta normalmente'
+    );
+
+    // 3. Verifica que KPIs e Kanban às 09:50 já contabilizam a presença da aula iniciada adiantada
+    const kpis0950 = computePerformanceKPIs(
+      evalAt0950,
+      9 * 60 + 50,
+      {},
+      [],
+      'Sexta-feira'
+    );
+    assert.equal(
+      kpis0950.presencaCount,
+      1,
+      'KPI de presenças às 09:50 já deve contabilizar 1 presença do aluno adiantado'
+    );
+    assert.equal(
+      kpis0950.iniciados,
+      1,
+      'KPI de iniciados às 09:50 já deve contabilizar 1 aula iniciada'
+    );
+
+    const cols0950 = groupByHourKanban(
+      evalAt0950,
+      'AGENDADO',
+      9 * 60 + 50,
+      {},
+      [],
+      'Sexta-feira'
+    );
+    assert.equal(cols0950.length, 1);
+    assert.equal(cols0950[0].presencaCount, 1);
+    assert.equal(cols0950[0].iniciados, 1);
+  });
 });

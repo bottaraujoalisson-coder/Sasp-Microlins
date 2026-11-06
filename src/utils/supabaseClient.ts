@@ -550,16 +550,27 @@ function mapSupabaseRowToStudentRecord(
   const rawPresenca = (row.presenca_ou_falta ?? '') as 'P' | 'F' | '';
   const rawInfoAula = String(row.info_aula ?? '');
   const rawStatus = (row.status ?? 'NÃO INICIADO') as ClassStatus;
-  const effectivePresenca: 'P' | 'F' | '' =
-    rawPresenca === 'P' || rawInfoAula === 'Sistema Acadêmico'
-      ? 'P'
-      : rawPresenca === 'F' || rawInfoAula === 'Falta'
-        ? 'F'
-        : '';
-  const effectiveStatus: ClassStatus =
-    effectivePresenca === 'P' && rawStatus === 'NÃO INICIADO'
-      ? 'FINALIZADO'
-      : rawStatus;
+  const rawInicio = String(row.inicio ?? '').trim();
+  const rawFim = String(row.fim ?? '').trim();
+  const hasExplicitPresenceSignal =
+    rawPresenca === 'P' ||
+    rawInfoAula === 'Sistema Acadêmico' ||
+    rawStatus === 'INICIADO' ||
+    rawStatus === 'FINALIZADO' ||
+    Boolean(rawInicio) ||
+    Boolean(rawFim);
+  const effectivePresenca: 'P' | 'F' | '' = hasExplicitPresenceSignal
+    ? 'P'
+    : rawPresenca === 'F' || rawInfoAula === 'Falta'
+      ? 'F'
+      : '';
+  const effectiveStatus: ClassStatus = rawFim
+    ? 'FINALIZADO'
+    : rawInicio && rawStatus !== 'FINALIZADO'
+      ? 'INICIADO'
+      : effectivePresenca === 'P' && rawStatus === 'NÃO INICIADO'
+        ? 'FINALIZADO'
+        : rawStatus;
 
   const contrato = String(row.contrato ?? '').trim();
   const overlayCausa = contrato

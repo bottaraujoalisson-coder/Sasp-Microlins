@@ -214,7 +214,7 @@ function seedSchoolCacheFromDbAndSupabase(schoolId: string = currentActiveSchool
       if (!existing || existing.fetchedAt === 0) {
         portalSession.cachedBySemana.set(code, {
           records: dayRecords,
-          fetchedAt: Date.now(),
+          fetchedAt: 0,
         });
       }
     }
@@ -250,7 +250,7 @@ function seedSchoolCacheFromDbAndSupabase(schoolId: string = currentActiveSchool
           );
           portalSession.cachedBySemana.set(code, {
             records: dayRecords,
-            fetchedAt: Date.now(),
+            fetchedAt: 0,
           });
         }
         if (remoteRecords.length > localStudents.length) {
@@ -264,16 +264,15 @@ function seedSchoolCacheFromDbAndSupabase(schoolId: string = currentActiveSchool
             );
           } catch {}
         }
-      } else {
-        // Se a tabela student_records no Supabase estiver vazia, sincroniza imediatamente do Portal e grava no Supabase
-        const liveRes = await syncLivePortalRecords();
-        if (liveRes.allWeekRecords.length > 0) {
-          await replaceStudentRecordsInSupabase(
-            liveRes.allWeekRecords,
-            schoolId,
-            codigoEscola
-          );
-        }
+      }
+      // Dispara sincronização ao vivo com o Portal do Aluno em background para atualizar o Supabase com as presenças em tempo real
+      const liveRes = await syncLivePortalRecords();
+      if (liveRes.allWeekRecords.length > 0 && liveRes.source === 'PORTAL_LIVE_VERIFIED') {
+        await replaceStudentRecordsInSupabase(
+          liveRes.allWeekRecords,
+          schoolId,
+          codigoEscola
+        ).catch(() => {});
       }
     })
     .catch(() => {});
@@ -775,22 +774,32 @@ function mapRawPortalItemToRecord(
 
   const inicio = String(item.AulaInicio || item.AulaInicioAula || '').trim();
   const fim = String(item.AulaFim || item.AulaFimAula || '').trim();
+  const concluidaAula =
+    String(item.ConcluidaAula || '').trim().toUpperCase() === 'S';
+  const hasRealizedClassCode =
+    Boolean(item.CodigoAulasRealizadas) &&
+    String(item.CodigoAulasRealizadas).trim() !== '0';
   const rawPresencaOuFalta = String(item.PresencaOuFalta || '')
     .trim()
     .toUpperCase();
   const presencaOuFalta: 'P' | 'F' | '' =
-    rawPresencaOuFalta === 'P' || Boolean(inicio) || Boolean(fim)
+    rawPresencaOuFalta === 'P' ||
+    Boolean(inicio) ||
+    Boolean(fim) ||
+    concluidaAula ||
+    hasRealizedClassCode
       ? 'P'
       : rawPresencaOuFalta === 'F'
       ? 'F'
       : '';
-  const status = fim
-    ? 'FINALIZADO'
-    : inicio
-    ? 'INICIADO'
-    : presencaOuFalta === 'P'
-    ? 'FINALIZADO'
-    : 'NÃO INICIADO';
+  const status =
+    fim || concluidaAula
+      ? 'FINALIZADO'
+      : inicio || hasRealizedClassCode
+      ? 'INICIADO'
+      : presencaOuFalta === 'P'
+      ? 'FINALIZADO'
+      : 'NÃO INICIADO';
 
   const cccm = String(item.CodigoContratoCursoMateria || '');
   const notaObj = notasDict[cccm];
@@ -810,7 +819,7 @@ function mapRawPortalItemToRecord(
     Boolean(PORTAL_APOSTILA_BY_CONTRATO[contrato]);
 
   const infoAula =
-    item.AulaInicio && item.CodigoAulasRealizadas
+    (Boolean(inicio) || Boolean(fim) || hasRealizedClassCode)
       ? 'Portal do Aluno'
       : rawPresencaOuFalta === 'P' && item.CodigoPresencaFalta
       ? 'Sistema Acadêmico'
@@ -1053,24 +1062,31 @@ async function fetchSingleWeekdayPortalRecords(
       durationMs: Date.now() - startMs,
     });
 
-    // Rebuild combined weekly cache without duplicates
+    // Rebuild combined weekly cache without duplicates and always persist live updates to Supabase
     const combined: StudentPerformanceRecord[] = [];
     let globalId = 1;
-    let allWeekdaysLiveFetched = true;
+    let populatedWeekdaysCount = 0;
     for (const code of ['1', '2', '3', '4', '5', '6', '7']) {
+      const codeDiaLabel = PORTAL_WEEKDAY_MAP[code];
       const dayEntry = portalSession.cachedBySemana.get(code);
-      if (code !== '7' && (!dayEntry || dayEntry.fetchedAt === 0)) {
-        allWeekdaysLiveFetched = false;
+      const dayRecords =
+        dayEntry && dayEntry.records.length > 0
+          ? dayEntry.records
+          : codeDiaLabel
+            ? portalSession.cachedAllWeekRecords.filter(
+                (r) => r.diaSemana === codeDiaLabel
+              )
+            : [];
+      if (code !== '7' && dayRecords.length > 0) {
+        populatedWeekdaysCount++;
       }
-      if (dayEntry && dayEntry.records.length > 0) {
-        for (const rec of dayEntry.records) {
-          combined.push({ ...rec, id: globalId++ });
-        }
+      for (const rec of dayRecords) {
+        combined.push({ ...rec, id: globalId++ });
       }
     }
     if (combined.length > 0) {
       portalSession.cachedAllWeekRecords = combined;
-      if (allWeekdaysLiveFetched) {
+      if (populatedWeekdaysCount >= 6 || combined.length >= 600) {
         try {
           upsertStudentRecordsInDb(
             combined,
@@ -3989,6 +4005,10 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    // Mantém o Supabase continuamente sincronizado em tempo real com o Portal do Aluno a cada 45s
+    setInterval(() => {
+      void syncLivePortalRecords().catch(() => {});
+    }, 45_000);
   });
 }
 

@@ -193,7 +193,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
       if (!dbLoaded && supaHealth.connected) {
         setDbStatus({
-          engine: 'Supabase PostgreSQL + SQLite',
+          engine: 'Supabase PostgreSQL + Supabase Auth (Único Banco Autorizado)',
           databaseFile: supaHealth.supabaseUrl,
           fileSizeBytes: 524288,
           walMode: true,

@@ -180,6 +180,7 @@ interface InternalEducatorRow {
 
 interface VolatileSupabaseState {
   initialized: boolean;
+  isUnitTestEnvironment: boolean;
   schools: Map<string, InternalSchoolRow>;
   users: Map<string, InternalUserRow>;
   sessions: Map<string, InternalSessionRow>;
@@ -197,6 +198,7 @@ interface VolatileSupabaseState {
 
 const volatileState: VolatileSupabaseState = {
   initialized: false,
+  isUnitTestEnvironment: false,
   schools: new Map(),
   users: new Map(),
   sessions: new Map(),
@@ -314,7 +316,8 @@ function ensureVolatileStateInitialized(): void {
     }
   }
 
-  // 3. Hidratação em tempo real a partir das tabelas oficiais do Supabase PostgreSQL
+  // 3. Hidratação em tempo real a partir das tabelas oficiais do Supabase PostgreSQL (exceto em testes unitários isolados)
+  if (volatileState.isUnitTestEnvironment) return;
   void (async () => {
     try {
       const [schoolsRes, usersRes, edRes, auditRes, syncRes] = await Promise.all([
@@ -449,6 +452,7 @@ export function getDatabase(_customDbPath?: string): {
 
 export function resetDatabaseConnectionForTests(_customDbPath?: string): void {
   volatileState.initialized = false;
+  volatileState.isUnitTestEnvironment = true;
   volatileState.schools.clear();
   volatileState.users.clear();
   volatileState.sessions.clear();
@@ -648,17 +652,19 @@ export function upsertSchoolInDb(input: {
   volatileState.schools.set(targetId, nextRow);
 
   // Persistir assincronamente no Supabase (Único Banco de Dados)
-  void upsertSchoolInSupabase({
-    id: targetId,
-    nome: nextRow.nome,
-    cidade: nextRow.cidade || undefined,
-    uf: nextRow.uf || undefined,
-    codigoPortal: nextRow.codigo_portal,
-    ativa: nextRow.ativa,
-    npsEmail: nextRow.nps_email,
-    npsCompanyFilter: nextRow.nps_company_filter || undefined,
-    npsBaseUrl: nextRow.nps_base_url,
-  }).catch(() => {});
+  if (!volatileState.isUnitTestEnvironment) {
+    void upsertSchoolInSupabase({
+      id: targetId,
+      nome: nextRow.nome,
+      cidade: nextRow.cidade || undefined,
+      uf: nextRow.uf || undefined,
+      codigoPortal: nextRow.codigo_portal,
+      ativa: nextRow.ativa,
+      npsEmail: nextRow.nps_email,
+      npsCompanyFilter: nextRow.nps_company_filter || undefined,
+      npsBaseUrl: nextRow.nps_base_url,
+    }).catch(() => {});
+  }
 
   const schools = getSchoolsFromDb(false);
   const school = schools.find((s) => s.id === targetId)!;
@@ -671,17 +677,19 @@ export function toggleSchoolStatusInDb(schoolId: string): RegisteredSchool[] {
   if (existing) {
     existing.ativa = !existing.ativa;
     existing.updated_at = new Date().toISOString();
-    void upsertSchoolInSupabase({
-      id: existing.id,
-      nome: existing.nome,
-      cidade: existing.cidade || undefined,
-      uf: existing.uf || undefined,
-      codigoPortal: existing.codigo_portal,
-      ativa: existing.ativa,
-      npsEmail: existing.nps_email,
-      npsCompanyFilter: existing.nps_company_filter || undefined,
-      npsBaseUrl: existing.nps_base_url,
-    }).catch(() => {});
+    if (!volatileState.isUnitTestEnvironment) {
+      void upsertSchoolInSupabase({
+        id: existing.id,
+        nome: existing.nome,
+        cidade: existing.cidade || undefined,
+        uf: existing.uf || undefined,
+        codigoPortal: existing.codigo_portal,
+        ativa: existing.ativa,
+        npsEmail: existing.nps_email,
+        npsCompanyFilter: existing.nps_company_filter || undefined,
+        npsBaseUrl: existing.nps_base_url,
+      }).catch(() => {});
+    }
   }
   return getSchoolsFromDb(false);
 }
@@ -701,7 +709,9 @@ export function deleteSchoolFromDb(schoolId: string): RegisteredSchool[] {
       volatileState.studentEducators.delete(key);
     }
   }
-  void deleteSchoolFromSupabase(schoolId).catch(() => {});
+  if (!volatileState.isUnitTestEnvironment) {
+    void deleteSchoolFromSupabase(schoolId).catch(() => {});
+  }
   return getSchoolsFromDb(false);
 }
 
@@ -803,16 +813,18 @@ export function upsertUserInDb(
   volatileState.loginAttempts.delete(login);
 
   // Sincronizar usuário no Supabase Auth e na tabela `users` do Supabase
-  void upsertUserInSupabase(schoolId, {
-    id: userId,
-    login,
-    senha: rawSenha,
-    nomeCompleto,
-    cargo,
-    escolaNome: schoolRow.nome,
-    codigoEscola: schoolRow.codigo_portal,
-    ativo: isAtivo,
-  }).catch(() => {});
+  if (!volatileState.isUnitTestEnvironment) {
+    void upsertUserInSupabase(schoolId, {
+      id: userId,
+      login,
+      senha: rawSenha,
+      nomeCompleto,
+      cargo,
+      escolaNome: schoolRow.nome,
+      codigoEscola: schoolRow.codigo_portal,
+      ativo: isAtivo,
+    }).catch(() => {});
+  }
 
   const schools = getSchoolsFromDb(false);
   const updatedSchool = schools.find((s) => s.id === schoolId)!;
@@ -841,7 +853,9 @@ export function updateUserPasswordInDb(
   existing.updated_at = new Date().toISOString();
   volatileState.loginAttempts.delete(normalizeLoginIdentifier(existing.login));
 
-  void updateUserPasswordInSupabase(schoolId, userId, novaSenha).catch(() => {});
+  if (!volatileState.isUnitTestEnvironment) {
+    void updateUserPasswordInSupabase(schoolId, userId, novaSenha).catch(() => {});
+  }
 
   const schools = getSchoolsFromDb(false);
   const updatedSchool = schools.find((s) => s.id === schoolId)!;
@@ -868,7 +882,9 @@ export function toggleUserStatusInDb(
       }
     }
 
-    void toggleUserStatusInSupabase(schoolId, userId).catch(() => {});
+    if (!volatileState.isUnitTestEnvironment) {
+      void toggleUserStatusInSupabase(schoolId, userId).catch(() => {});
+    }
   }
   return getSchoolsFromDb(false);
 }
@@ -886,7 +902,9 @@ export function deleteUserFromDb(
         s.revoked_at = new Date().toISOString();
       }
     }
-    void deleteUserFromSupabase(schoolId, userId).catch(() => {});
+    if (!volatileState.isUnitTestEnvironment) {
+      void deleteUserFromSupabase(schoolId, userId).catch(() => {});
+    }
   }
   return getSchoolsFromDb(false);
 }
@@ -1911,6 +1929,8 @@ export function comparePortalWithStoredRecords<T extends Record<string, any>>(
       existing.presencaOuFalta === 'P' ||
       existing.presencaOuFalta === 'Presença' ||
       existing.infoAula === 'Sistema Acadêmico' ||
+      existing.status === 'INICIADO' ||
+      existing.status === 'FINALIZADO' ||
       Boolean(existing.inicio) ||
       Boolean(existing.fim);
 
@@ -1919,6 +1939,8 @@ export function comparePortalWithStoredRecords<T extends Record<string, any>>(
       incoming.presencaOuFalta === 'Presença' ||
       incoming.presencaOuFalta === 'F' ||
       incoming.presencaOuFalta === 'Falta' ||
+      incoming.status === 'INICIADO' ||
+      incoming.status === 'FINALIZADO' ||
       Boolean(incoming.inicio) ||
       Boolean(incoming.fim);
 
@@ -1931,13 +1953,22 @@ export function comparePortalWithStoredRecords<T extends Record<string, any>>(
         type: 'PRESERVED_CONFIRMED_PRESENCE',
         details: `Presença confirmada preservada para contrato ${contrato} em ${diaSemana} ${horaInicio}.`,
       });
+      const preservedInicio = existing.inicio || incoming.inicio || '';
+      const preservedFim = existing.fim || incoming.fim || '';
       reconciledRecords.push({
         ...incoming,
-        presencaOuFalta: existing.presencaOuFalta || 'Presença',
-        inicio: existing.inicio || incoming.inicio,
-        fim: existing.fim || incoming.fim,
+        presencaOuFalta:
+          existing.presencaOuFalta === 'P' || existing.presencaOuFalta === 'Presença'
+            ? existing.presencaOuFalta
+            : 'P',
+        inicio: preservedInicio,
+        fim: preservedFim,
         infoAula: existing.infoAula || incoming.infoAula,
-        status: existing.status || 'FINALIZADO',
+        status: preservedFim
+          ? 'FINALIZADO'
+          : preservedInicio && existing.status !== 'FINALIZADO'
+            ? 'INICIADO'
+            : existing.status || 'FINALIZADO',
         educador: incoming.educador || existing.educador,
         educadorCachedAt:
           incoming.educadorCachedAt || existing.educadorCachedAt,
@@ -1946,7 +1977,12 @@ export function comparePortalWithStoredRecords<T extends Record<string, any>>(
       continue;
     }
 
-    if (existing.presencaOuFalta !== incoming.presencaOuFalta) {
+    if (
+      existing.presencaOuFalta !== incoming.presencaOuFalta ||
+      existing.status !== incoming.status ||
+      existing.inicio !== incoming.inicio ||
+      existing.fim !== incoming.fim
+    ) {
       updatedCount++;
       divergences.push({
         contrato,
@@ -1954,9 +1990,9 @@ export function comparePortalWithStoredRecords<T extends Record<string, any>>(
         horaInicio,
         type: 'STATUS_UPDATED',
         details: `Status alterado de "${
-          existing.presencaOuFalta || 'vazio'
+          existing.presencaOuFalta || existing.status || 'vazio'
         }" para "${
-          incoming.presencaOuFalta || 'vazio'
+          incoming.presencaOuFalta || incoming.status || 'vazio'
         }" no contrato ${contrato}.`,
       });
     }
@@ -2026,17 +2062,31 @@ export function upsertStudentRecordsInDb<T extends Record<string, any>>(
     const recUnidade = String(r.unidade || unidade).trim();
     const rawSala = String(r.sala || '').trim();
     const cleanSala = rawSala.split(' - ')[0].trim() || 'Sala não informada';
+    const rawInicio = String(r.inicio || '').trim();
+    const rawFim = String(r.fim || '').trim();
     const isConfirmedPresence =
-      r.presencaOuFalta === 'P' || r.infoAula === 'Sistema Acadêmico';
+      r.presencaOuFalta === 'P' ||
+      r.infoAula === 'Sistema Acadêmico' ||
+      r.status === 'INICIADO' ||
+      r.status === 'FINALIZADO' ||
+      Boolean(rawInicio) ||
+      Boolean(rawFim);
+    const resolvedStatus = rawFim
+      ? 'FINALIZADO'
+      : rawInicio && r.status !== 'FINALIZADO'
+        ? 'INICIADO'
+        : isConfirmedPresence && r.status === 'NÃO INICIADO'
+          ? 'FINALIZADO'
+          : r.status || 'NÃO INICIADO';
 
     return {
       ...r,
       id: idx + 1,
       sala: cleanSala,
       modalidade: 'Presencial',
-      ...(isConfirmedPresence && r.status === 'NÃO INICIADO'
-        ? { presencaOuFalta: 'P', status: 'FINALIZADO' }
-        : {}),
+      ...(isConfirmedPresence
+        ? { presencaOuFalta: 'P', status: resolvedStatus }
+        : { status: resolvedStatus }),
       educador: educador || undefined,
       educadorCachedAt: r.educadorCachedAt || cachedEd?.updatedAt || undefined,
       unidade: recUnidade,
@@ -2046,11 +2096,13 @@ export function upsertStudentRecordsInDb<T extends Record<string, any>>(
   });
 
   volatileState.studentRecordsBySchool.set(cleanSchoolId, normalizedList);
-  void replaceStudentRecordsInSupabase(
-    normalizedList as any,
-    cleanSchoolId,
-    cleanCodigo
-  ).catch(() => {});
+  if (!volatileState.isUnitTestEnvironment) {
+    void replaceStudentRecordsInSupabase(
+      normalizedList as any,
+      cleanSchoolId,
+      cleanCodigo
+    ).catch(() => {});
+  }
 }
 
 export function getStudentRecordsFromDb<T = any>(
@@ -2145,9 +2197,11 @@ export function upsertNpsRecordsInDb<T extends Record<string, any>>(
 
   const nextList = Array.from(byId.values());
   volatileState.npsRecordsBySchool.set(cleanSchoolId, nextList);
-  void replaceNpsRecordsInSupabase(nextList as any, cleanSchoolId).catch(
-    () => {}
-  );
+  if (!volatileState.isUnitTestEnvironment) {
+    void replaceNpsRecordsInSupabase(nextList as any, cleanSchoolId).catch(
+      () => {}
+    );
+  }
 }
 
 export function getNpsRecordsFromDb<T = any>(

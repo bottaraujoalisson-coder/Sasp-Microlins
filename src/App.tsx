@@ -427,23 +427,32 @@ export default function App() {
     };
   }, []);
 
-  // Carrega escolas e usuários cadastrados no servidor ao iniciar
+  // Carrega escolas e usuários cadastrados no servidor ou diretamente do Supabase (ex.: Netlify)
   useEffect(() => {
     let active = true;
     fetch('/api/admin/schools', { credentials: 'include' })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error('API indisponível em ambiente estático');
+        return r.json();
+      })
       .then((data) => {
         if (active && data?.ok && Array.isArray(data.schools)) {
           setSchoolsRegistry(data.schools);
         }
       })
       .catch(() => {
-        // Mantém registro local padrão
+        fetchSchoolsFromSupabase()
+          .then((remoteSchools) => {
+            if (active && remoteSchools && remoteSchools.length > 0) {
+              setSchoolsRegistry(remoteSchools);
+            }
+          })
+          .catch(() => {});
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [authSession?.login, authSession?.role]);
 
   const handleLoginSuccess = useCallback(
     (
@@ -736,7 +745,7 @@ export default function App() {
     syncPortalData();
     const timer = setInterval(() => syncPortalData(), AUTO_SYNC_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [syncPortalData]);
+  }, [syncPortalData, authSession?.login, authSession?.schoolId]);
 
   const effectiveEvalWeekday =
     currentBrasiliaWeekday || getCurrentBrasiliaWeekdayLabel();

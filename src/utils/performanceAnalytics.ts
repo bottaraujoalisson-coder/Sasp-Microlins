@@ -1558,34 +1558,55 @@ export function evaluateStudentAttendance(
 
   const manualOverride = manualAttendanceOverrides[record.id];
 
-  // Regra de Reset Semanal no Domingo e Contabilização Somente ao Chegar a Aula do Aluno:
-  // - A semana começa no Domingo (índice 0 em WEEKDAY_CHRONOLOGICAL_ORDER).
-  // - Se a aula pertence a um dia futuro da semana atual (`dayRelation === 'FUTURE_DAY'`, ex.: no Domingo todos os dias de Segunda a Sábado são futuros)
-  //   OU se é no dia atual mas ainda não chegou o horário de início da aula do aluno (`dayRelation === 'CURRENT_DAY' && currentTimeMinutes < scheduledStartMinutes`),
-  //   qualquer presença ou falta é zerada/resetada e o status permanece 'Não iniciada' até chegar a aula do aluno.
-  const hasClassTimeArrivedInWeek =
-    dayRelation === 'PAST_DAY' ||
-    (dayRelation === 'CURRENT_DAY' &&
-      currentTimeMinutes >= scheduledStartMinutes);
-
   const rawStatusStr = String(record.status || '').toUpperCase().trim();
   const rawInfoAulaStr = String(record.infoAula || '').toUpperCase().trim();
+  const rawPresencaStr = String(record.presencaOuFalta || '').toUpperCase().trim();
 
-  // Prioridade 1: Sistema informa PRESENÇA confirmada (Portal, Biometria, Início/Fim registrado ou Sistema Acadêmico)
+  // Prioridade 1: Sistema informa PRESENÇA confirmada (Portal, Biometria, Início/Fim registrado, Aula iniciada adiantada ou Sistema Acadêmico)
   const hasSystemPresence =
-    record.presencaOuFalta === 'P' ||
+    rawPresencaStr === 'P' ||
+    rawPresencaStr === 'PRESENÇA' ||
+    rawPresencaStr === 'PRESENCA' ||
     record.statusSistema === 'PRESENCA' ||
-    record.status === 'FINALIZADO' ||
-    record.status === 'INICIADO' ||
+    rawStatusStr === 'FINALIZADO' ||
+    rawStatusStr === 'INICIADO' ||
     rawInfoAulaStr === 'SISTEMA ACADÊMICO' ||
     rawInfoAulaStr === 'SISTEMA ACADEMICO' ||
+    (rawInfoAulaStr === 'PORTAL DO ALUNO' &&
+      (Boolean(record.inicio && record.inicio.trim() !== '') ||
+        Boolean(record.fim && record.fim.trim() !== '') ||
+        (rawStatusStr !== '' && rawStatusStr !== 'NÃO INICIADO' && rawStatusStr !== 'NAO INICIADO'))) ||
     Boolean(record.inicio && record.inicio.trim() !== '') ||
     Boolean(record.fim && record.fim.trim() !== '');
+
+  // Suporte a aulas que começam adiantadas (ex.: agendada às 10:00, mas o aluno iniciou às 09:50 no Portal):
+  // Se o Portal já registrou início/presença no dia atual (ou se o timestamp de início já foi atingido),
+  // a aula é considerada iniciada imediatamente, sem aguardar o horário agendado e sem jamais rebaixar para 'NÃO INICIADO' ou 'Falta'.
+  const inicioTimestampParts = parsePortalTimestampParts(record.inicio);
+  const hasStartedEarlyToday =
+    dayRelation === 'CURRENT_DAY' &&
+    (hasSystemPresence ||
+      (inicioTimestampParts !== null &&
+        inicioTimestampParts.minutesOfDay <= currentTimeMinutes));
+
+  // Regra de Reset Semanal no Domingo e Contabilização ao Chegar ou Iniciar Adiantado a Aula do Aluno:
+  // - A semana começa no Domingo (índice 0 em WEEKDAY_CHRONOLOGICAL_ORDER).
+  // - Se a aula pertence a um dia futuro da semana atual (`dayRelation === 'FUTURE_DAY'`)
+  //   OU se é no dia atual, ainda não chegou o horário agendado (`currentTimeMinutes < scheduledStartMinutes`)
+  //   E o aluno ainda NÃO iniciou a aula adiantada (`!hasStartedEarlyToday`),
+  //   o status permanece 'Não iniciada' até chegar o horário ou o aluno iniciar a aula.
+  const hasClassTimeArrivedInWeek =
+    dayRelation === 'PAST_DAY' ||
+    hasStartedEarlyToday ||
+    (dayRelation !== 'FUTURE_DAY' && hasSystemPresence) ||
+    (dayRelation === 'CURRENT_DAY' &&
+      currentTimeMinutes >= scheduledStartMinutes);
 
   // Prioridade 2: Sistema informa FALTA explícita confirmada
   const hasSystemAbsence =
     !hasSystemPresence &&
-    (record.presencaOuFalta === 'F' ||
+    (rawPresencaStr === 'F' ||
+      rawPresencaStr === 'FALTA' ||
       record.statusSistema === 'FALTA' ||
       rawStatusStr === 'FALTA' ||
       rawInfoAulaStr === 'FALTA');
@@ -1622,12 +1643,12 @@ export function evaluateStudentAttendance(
       scheduleStage = 'HORARIO_FUTURO';
       scheduleStageLabel = 'Não iniciada';
     }
-  } else if (hasSystemPresence) {
-    // Se o sistema informa PRESENÇA confirmada, contabiliza Presença imediatamente
+  } else if (hasSystemPresence && dayRelation !== 'FUTURE_DAY') {
+    // Se o sistema informa PRESENÇA confirmada (inclusive aula iniciada adiantada antes do horário agendado), contabiliza Presença imediatamente
     attendanceStatus = 'Presença';
     scheduleStage = 'CONCLUIDO';
     scheduleStageLabel = 'Presença';
-  } else if (hasSystemAbsence) {
+  } else if (hasSystemAbsence && dayRelation !== 'FUTURE_DAY') {
     // Se o sistema informa FALTA explícita confirmada, contabiliza Falta imediatamente
     attendanceStatus = 'Falta';
     scheduleStage = 'FALTA_CONTABILIZADA';
@@ -1733,11 +1754,19 @@ export function evaluateStudentAttendance(
 
   const effectiveRecordStatus: ClassStatus = !hasClassTimeArrivedInWeek
     ? 'NÃO INICIADO'
+    : hasSystemPresence
+    ? Boolean(record.fim && record.fim.trim() !== '') || rawStatusStr === 'FINALIZADO'
+      ? 'FINALIZADO'
+      : Boolean(record.inicio && record.inicio.trim() !== '') || rawStatusStr === 'INICIADO'
+      ? 'INICIADO'
+      : 'FINALIZADO'
     : record.status;
   const effectiveInicio = !hasClassTimeArrivedInWeek ? '' : record.inicio;
   const effectiveFim = !hasClassTimeArrivedInWeek ? '' : record.fim;
   const effectivePresencaOuFalta = !hasClassTimeArrivedInWeek
     ? ''
+    : hasSystemPresence
+    ? 'P'
     : record.presencaOuFalta;
 
   // Item 1.1: Parcelas em Atraso preservadas internamente (ex.: 0, 1, 3, 6...), mantendo indicador estritamente binário na UI pedagógica

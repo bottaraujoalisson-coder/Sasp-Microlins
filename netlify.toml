@@ -1,6 +1,12 @@
 [build]
   command = "npm run build"
   publish = "dist"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/microlins/sync"
+  to = "/.netlify/functions/microlins-sync"
+  status = 200
 
 [[redirects]]
   from = "/api/*"
