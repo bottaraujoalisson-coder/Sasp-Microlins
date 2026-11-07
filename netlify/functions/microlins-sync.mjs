@@ -138,7 +138,8 @@ function mapRawPortalItemToRecord(item, idx, diaLabel, notasDict, existingBySlot
   const timeSlotKey = `${contrato}|${diaLabel}|${horaInicio}`;
   const stored = existingBySlot.get(slotKey) || existingBySlot.get(timeSlotKey);
 
-  const incomingPresenca =
+  // O Portal do Aluno é a referência 100% autoritativa para Presença (P), Falta (F), Início e Fim
+  const presencaOuFalta =
     rawPresencaOuFalta === 'P' ||
     Boolean(inicio) ||
     Boolean(fim) ||
@@ -149,24 +150,10 @@ function mapRawPortalItemToRecord(item, idx, diaLabel, notasDict, existingBySlot
         ? 'F'
         : '';
 
-  const storedHasConfirmedPresence =
-    stored &&
-    (stored.presencaOuFalta === 'P' ||
-      stored.infoAula === 'Sistema Acadêmico' ||
-      stored.status === 'INICIADO' ||
-      stored.status === 'FINALIZADO' ||
-      Boolean(stored.inicio) ||
-      Boolean(stored.fim));
-
-  const effectiveInicio = inicio || (storedHasConfirmedPresence ? stored.inicio || '' : '');
-  const effectiveFim = fim || (storedHasConfirmedPresence ? stored.fim || '' : '');
-  const presencaOuFalta =
-    incomingPresenca || (storedHasConfirmedPresence ? 'P' : '');
-
   const status =
-    effectiveFim || concluidaAula
+    fim || concluidaAula
       ? 'FINALIZADO'
-      : effectiveInicio || hasRealizedClassCode
+      : inicio || hasRealizedClassCode
         ? 'INICIADO'
         : presencaOuFalta === 'P'
           ? 'FINALIZADO'
@@ -177,32 +164,30 @@ function mapRawPortalItemToRecord(item, idx, diaLabel, notasDict, existingBySlot
   const nota =
     notaObj && notaObj.UltimaNota !== undefined && notaObj.UltimaNota !== ''
       ? Number(notaObj.UltimaNota)
-      : stored?.nota ?? null;
+      : null;
   const notaAulaNumero =
     notaObj && notaObj.Aula !== undefined && notaObj.Aula !== ''
       ? Number(notaObj.Aula)
-      : stored?.notaAulaNumero ?? null;
+      : null;
   const aulaNum = Number(
-    item.AulaAtual || item.Aula || (notaObj ? notaObj.Aula : 0) || stored?.aulaNumero || 0
+    item.AulaAtual || item.Aula || (notaObj ? notaObj.Aula : 0) || 0
   );
   const possuiApostila =
     Boolean(item.idcodigoapostila || item.CodigoApostila) ||
     Boolean(stored?.possuiApostila);
 
   const infoAula =
-    Boolean(effectiveInicio) || Boolean(effectiveFim) || hasRealizedClassCode
+    Boolean(inicio) || Boolean(fim) || hasRealizedClassCode
       ? 'Portal do Aluno'
       : rawPresencaOuFalta === 'P' && item.CodigoPresencaFalta
         ? 'Sistema Acadêmico'
-        : storedHasConfirmedPresence && stored?.infoAula
-          ? stored.infoAula
-          : rawPresencaOuFalta === 'F' && item.CodigoPresencaFalta
-            ? 'Falta'
-            : 'Não registrado';
+        : rawPresencaOuFalta === 'F' && item.CodigoPresencaFalta
+          ? 'Falta'
+          : 'Não registrado';
 
   const parcelasAtrasadas = Math.max(
     0,
-    Math.floor(Number(item.ParcelasAtrasadas || item.Inadimplente || stored?.parcelasAtrasadas || 0))
+    Math.floor(Number(item.ParcelasAtrasadas || item.Inadimplente || 0))
   );
 
   const rawPortalEducator = String(
@@ -232,7 +217,10 @@ function mapRawPortalItemToRecord(item, idx, diaLabel, notasDict, existingBySlot
     id: idx + 1,
     contrato,
     aulaId: String(
-      item.CodigoAulasRealizadas || item.CodigoPresencaFalta || cccm || idx + 1
+      item.Codigo ||
+        item.CodigoAulasRealizadas ||
+        item.CodigoPresencaFalta ||
+        (cccm ? `${cccm}-${idx + 1}` : idx + 1)
     ),
     nomeCompleto,
     nomeCurto,
@@ -255,23 +243,113 @@ function mapRawPortalItemToRecord(item, idx, diaLabel, notasDict, existingBySlot
     turno,
     sala: salaClean,
     modalidade: 'Presencial',
-    inicio: effectiveInicio,
-    fim: effectiveFim,
+    inicio,
+    fim,
     nota,
     notaAulaNumero,
     notaId: cccm,
     infoAula,
     status,
     presencaOuFalta,
+    statusSistema:
+      presencaOuFalta === 'P'
+        ? 'PRESENCA'
+        : presencaOuFalta === 'F'
+          ? 'FALTA'
+          : 'NAO_REGISTRADO',
     inadimplente: parcelasAtrasadas > 0,
     parcelasAtrasadas,
     diaSemana: diaLabel,
     schoolId: DEFAULT_SCHOOL_ID,
     escolaCodigo: PORTAL_ESCOLA,
     unidade: 'ESCOLA PRESIDENTE PRUDENTE',
-    linkLoginUrl: stored?.linkLoginUrl || 'https://portaldoaluno.microlins.com.br/',
+    linkLoginUrl:
+      stored?.linkLoginUrl || 'https://portaldoaluno.microlins.com.br/login/',
     educador,
+    email: stored?.email || undefined,
     causaFaltaMaterialExplicita: stored?.causaFaltaMaterialExplicita || undefined,
+  };
+}
+
+function formatBrasiliaSyncTimestamp(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(date);
+  const get = (t) => parts.find((p) => p.type === t)?.value || '00';
+  const dateStr = `${get('day')}/${get('month')}/${get('year')}`;
+  const timeStr = `${get('hour')}:${get('minute')}:${get('second')}`;
+  return {
+    dateStr,
+    timeStr,
+    formatted: `${dateStr} ${timeStr}`,
+    year: Number(get('year')) || date.getFullYear(),
+  };
+}
+
+function deduplicateWeekdayRecords(records) {
+  return Array.isArray(records) ? records : [];
+}
+
+function mapSupabaseNpsRowToInvitation(row) {
+  return {
+    id: String(row.id),
+    controlId: row.control_id ?? '',
+    studentName: row.student_name ?? '',
+    email: row.email ?? '',
+    phone: row.phone ?? '',
+    whatsappPhoneFormatted: row.whatsapp_phone_formatted ?? '',
+    surveyUrl: row.survey_url ?? '',
+    invitationStatus: row.invitation_status ?? 'ativo',
+    answered: Boolean(row.answered),
+    attemptsCount: Number(row.attempts_count ?? 1),
+    createdAt: row.created_at ?? '',
+    sentAt: row.sent_at ?? '',
+    expiresAt: row.expires_at ?? '',
+    unitName: row.unit_name ?? '',
+    companyId: row.company_id ?? '',
+    journeyId: row.journey_id ?? '',
+    journeyName: row.journey_name ?? '',
+    pontoJornada: row.ponto_jornada ?? '',
+    origem: row.origem ?? 'E-mail',
+    contrato: row.contrato ?? undefined,
+    linkedHorario: row.linked_horario ?? undefined,
+    linkedDiaSemana: row.linked_dia_semana ?? undefined,
+    npsDestinatario: row.nps_destinatario ?? undefined,
+    respondenteNome: row.respondente_nome ?? undefined,
+    nivelCruzamento: row.nivel_cruzamento ?? undefined,
+    alunosVinculadosFamilia: Array.isArray(row.alunos_vinculados_familia)
+      ? row.alunos_vinculados_familia
+      : undefined,
+    emailDeliveryStatus: row.email_delivery_status ?? undefined,
+    emailDeliveryEvents: Array.isArray(row.email_delivery_events)
+      ? row.email_delivery_events
+      : undefined,
+    emailLastEventAt: row.email_last_event_at ?? undefined,
+    emailBounceReason: row.email_bounce_reason ?? undefined,
+    priorizarNpsNoLogin:
+      row.priorizar_nps_no_login !== null && row.priorizar_nps_no_login !== undefined
+        ? Boolean(row.priorizar_nps_no_login)
+        : undefined,
+    cicloPriorizado: row.ciclo_priorizado ?? undefined,
+    priorizadoPor: row.priorizado_por ?? undefined,
+    priorizadoEm: row.priorizado_em ?? undefined,
+    notaNps:
+      row.nota_nps !== null && row.nota_nps !== undefined
+        ? Number(row.nota_nps)
+        : undefined,
+    comentarioNps: row.comentario_nps ?? undefined,
+    answeredAt: row.answered_at ?? undefined,
+    ultimoReenvioEmailEm: row.ultimo_reenvio_email_em ?? undefined,
+    ultimoReenvioEmailPor: row.ultimo_reenvio_email_por ?? undefined,
+    emailAnterior: row.email_anterior ?? undefined,
   };
 }
 
@@ -337,6 +415,12 @@ function mapSupabaseRowToRecord(row) {
     infoAula: rawInfoAula,
     status: effectiveStatus,
     presencaOuFalta: effectivePresenca,
+    statusSistema:
+      effectivePresenca === 'P'
+        ? 'PRESENCA'
+        : effectivePresenca === 'F'
+          ? 'FALTA'
+          : 'NAO_REGISTRADO',
     inadimplente: Boolean(row.inadimplente),
     parcelasAtrasadas: Number(row.parcelas_atrasadas ?? 0),
     diaSemana: row.dia_semana ?? 'Sexta-feira',
@@ -406,8 +490,10 @@ export async function handler(event) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
+    const syncTime = formatBrasiliaSyncTimestamp(new Date());
     const semanaParam = event?.queryStringParameters?.semana || '';
-    const { semanaCode: todayCode } = getBrasiliaDayOfWeek(new Date());
+    const { semanaCode: todayCode, diaLabel: todayDiaLabel } =
+      getBrasiliaDayOfWeek(new Date());
     let targetCode = todayCode;
     if (semanaParam && PORTAL_WEEKDAY_MAP[semanaParam]) {
       targetCode = semanaParam;
@@ -427,14 +513,24 @@ export async function handler(event) {
       : [];
 
     const existingBySlot = new Map();
+    const authLinksByContrato = new Map();
     for (const r of storedRecords) {
       existingBySlot.set(`${r.contrato}|${r.diaSemana}|${r.horaInicio}|${r.curso}`, r);
       existingBySlot.set(`${r.contrato}|${r.diaSemana}|${r.horaInicio}`, r);
+      if (
+        r.contrato &&
+        r.linkLoginUrl &&
+        String(r.linkLoginUrl).startsWith(
+          'https://portaldoaluno.microlins.com.br/autenticacao/tokenAluno/'
+        )
+      ) {
+        authLinksByContrato.set(String(r.contrato).trim(), String(r.linkLoginUrl).trim());
+      }
     }
 
-    // 2. Authenticate with Portal do Aluno Microlins and fetch live target weekday
+    // 2. Authenticate with Portal do Aluno Microlins and fetch ALL 6 weekdays (1..6) in parallel
     const jar = new Map();
-    let liveDayRecords = null;
+    const liveRecordsByCode = new Map();
     try {
       const parsePortalJsonResponse = async (res) => {
         try {
@@ -505,75 +601,140 @@ export async function handler(event) {
       }
 
       const cookieHeader = serializeCookieJar(jar);
-      const [rAlunos, rNotas] = await Promise.all([
-        fetch('https://portaldoaluno.microlins.com.br//dashboard/dadosAlunosAula', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'X-Requested-With': 'XMLHttpRequest',
-            Cookie: cookieHeader,
-          },
-          body: new URLSearchParams({
-            tipoPesq: 'aluno',
-            nome: '',
-            escola: PORTAL_ESCOLA,
-            horaInicio: '',
-            horaFim: '',
-            semana: targetCode,
-            sala: '',
-          }).toString(),
-        }),
-        fetch('https://portaldoaluno.microlins.com.br//dashboard/getUltimaNotaContrato', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'X-Requested-With': 'XMLHttpRequest',
-            Cookie: cookieHeader,
-          },
-          body: new URLSearchParams({
-            CodigoContratoCursoMateria: '0',
-            semana: targetCode,
-          }).toString(),
-        }),
-      ]);
+      const weekdayCodes = ['1', '2', '3', '4', '5', '6'];
+      await Promise.all(
+        weekdayCodes.map(async (code) => {
+          const [rAlunos, rNotas] = await Promise.all([
+            fetch('https://portaldoaluno.microlins.com.br//dashboard/dadosAlunosAula', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-Requested-With': 'XMLHttpRequest',
+                Cookie: cookieHeader,
+              },
+              body: new URLSearchParams({
+                tipoPesq: 'aluno',
+                nome: '',
+                escola: PORTAL_ESCOLA,
+                horaInicio: '',
+                horaFim: '',
+                semana: code,
+                sala: '',
+              }).toString(),
+            }),
+            fetch(
+              'https://portaldoaluno.microlins.com.br//dashboard/getUltimaNotaContrato',
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                  'X-Requested-With': 'XMLHttpRequest',
+                  Cookie: cookieHeader,
+                },
+                body: new URLSearchParams({
+                  CodigoContratoCursoMateria: '0',
+                  semana: code,
+                }).toString(),
+              }
+            ),
+          ]);
 
-      if (rAlunos.ok) {
-        const dados = await parsePortalJsonResponse(rAlunos);
-        const notasDict = rNotas.ok
-          ? (await parsePortalJsonResponse(rNotas)) || {}
-          : {};
-        if (dados && Array.isArray(dados.listaAlunos)) {
-          const targetDiaLabel = PORTAL_WEEKDAY_MAP[targetCode] || 'Sexta-feira';
-          liveDayRecords = dados.listaAlunos.map((item, idx) =>
-            mapRawPortalItemToRecord(item, idx, targetDiaLabel, notasDict, existingBySlot)
-          );
+          if (rAlunos.ok) {
+            const dados = await parsePortalJsonResponse(rAlunos);
+            const notasDict = rNotas.ok
+              ? (await parsePortalJsonResponse(rNotas)) || {}
+              : {};
+            if (dados && Array.isArray(dados.listaAlunos)) {
+              const codeDiaLabel = PORTAL_WEEKDAY_MAP[code] || 'Sexta-feira';
+              const rawDayMapped = dados.listaAlunos.map((item, idx) =>
+                mapRawPortalItemToRecord(
+                  item,
+                  idx,
+                  codeDiaLabel,
+                  notasDict,
+                  existingBySlot
+                )
+              );
+              liveRecordsByCode.set(code, deduplicateWeekdayRecords(rawDayMapped));
+            }
+          }
+        })
+      );
+
+      // Para contratos ainda sem link de autenticação tokenAluno, busca em lote na sessão autenticada do Portal
+      const missingAuthContracts = new Set();
+      for (const dayList of liveRecordsByCode.values()) {
+        for (const rec of dayList) {
+          const c = String(rec.contrato || '').trim();
+          if (c && !authLinksByContrato.has(c)) {
+            missingAuthContracts.add(c);
+          }
         }
+      }
+      const contractsToFetch = Array.from(missingAuthContracts).slice(0, 60);
+      if (contractsToFetch.length > 0) {
+        await Promise.all(
+          contractsToFetch.map(async (contrato) => {
+            try {
+              const rAuth = await fetch(
+                'https://portaldoaluno.microlins.com.br/dashboard/geraLinkAlunoAutenticacao',
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Cookie: cookieHeader,
+                  },
+                  body: new URLSearchParams({ contrato }).toString(),
+                }
+              );
+              if (rAuth.ok) {
+                const authData = await parsePortalJsonResponse(rAuth);
+                if (
+                  authData &&
+                  typeof authData.link === 'string' &&
+                  authData.link.startsWith(
+                    'https://portaldoaluno.microlins.com.br/autenticacao/tokenAluno/'
+                  )
+                ) {
+                  authLinksByContrato.set(contrato, authData.link.trim());
+                }
+              }
+            } catch {}
+          })
+        );
       }
     } catch (portalErr) {
       console.error('[Netlify Sync] Portal fetch error:', portalErr);
     }
 
-    // 3. Merge liveDayRecords into the full week array and persist back to Supabase
+    // 3. Combine all 6 weekdays (1..6) using Portal do Aluno as 100% authoritative source and persist to Supabase
     let finalAllWeek = storedRecords;
     let source = 'LOCAL_CACHE_SYNC';
-    if (Array.isArray(liveDayRecords) && liveDayRecords.length > 0) {
+    if (liveRecordsByCode.size > 0) {
       source = 'PORTAL_LIVE_VERIFIED';
-      const targetDiaLabel = PORTAL_WEEKDAY_MAP[targetCode] || 'Sexta-feira';
       const combined = [];
       let globalId = 1;
       for (const code of ['1', '2', '3', '4', '5', '6', '7']) {
         const label = PORTAL_WEEKDAY_MAP[code];
-        const dayList =
-          code === targetCode
-            ? liveDayRecords
-            : storedRecords.filter((r) => r.diaSemana === label);
+        const dayList = liveRecordsByCode.has(code)
+          ? liveRecordsByCode.get(code)
+          : storedRecords.filter((r) => r.diaSemana === label);
         for (const rec of dayList) {
-          combined.push({ ...rec, id: globalId++ });
+          const resolvedAuthLink =
+            authLinksByContrato.get(String(rec.contrato || '').trim()) ||
+            rec.linkLoginUrl ||
+            'https://portaldoaluno.microlins.com.br/login/';
+          combined.push({
+            ...rec,
+            id: globalId++,
+            linkLoginUrl: resolvedAuthLink,
+          });
         }
       }
       finalAllWeek = combined;
 
-      if (combined.length >= 600) {
+      if (combined.length > 0) {
         const payloadRows = combined.map((r, idx) => mapRecordToSupabaseRow(r, idx));
         await sb.rpc('replace_school_student_records', {
           p_school_id: DEFAULT_SCHOOL_ID,
@@ -587,16 +748,37 @@ export async function handler(event) {
       .select('*')
       .eq('school_id', DEFAULT_SCHOOL_ID);
 
+    const activeNpsInvitations = Array.isArray(npsRows)
+      ? npsRows.map(mapSupabaseNpsRowToInvitation)
+      : [];
+    const targetDiaLabel = PORTAL_WEEKDAY_MAP[targetCode] || todayDiaLabel;
+    const dayRecords = finalAllWeek.filter((r) => r.diaSemana === targetDiaLabel);
+
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         ok: true,
         source,
-        syncedAt: new Date().toISOString(),
+        npsSource: 'SUPABASE_SYNC',
+        npsReferenceYear: syncTime.year,
+        syncedAt: syncTime.timeStr,
+        syncedDate: syncTime.dateStr,
+        syncedFormatted: syncTime.formatted,
+        intervalSeconds: 60,
+        metadata: {
+          unidade: 'ESCOLA PRESIDENTE PRUDENTE',
+          codigoEscola: PORTAL_ESCOLA,
+          diaSemana: todayDiaLabel,
+          dataReferencia: syncTime.dateStr,
+          horaExtracao: syncTime.timeStr,
+          usuarioLogin: PORTAL_LOGIN,
+        },
         records: finalAllWeek,
+        dayRecords,
         allWeekRecords: finalAllWeek,
-        activeNpsInvitationsCount: Array.isArray(npsRows) ? npsRows.length : 0,
+        activeNpsInvitations,
+        activeNpsInvitationsCount: activeNpsInvitations.length,
       }),
     };
   } catch (err) {

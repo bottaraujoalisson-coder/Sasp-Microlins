@@ -196,6 +196,15 @@ function seedSchoolCacheFromDbAndSupabase(schoolId: string = currentActiveSchool
   const localStudents = getStudentRecordsFromDb(schoolId);
   if (localStudents.length > 0) {
     portalSession.cachedAllWeekRecords = localStudents.map((r) => {
+      if (
+        r.contrato &&
+        r.linkLoginUrl &&
+        String(r.linkLoginUrl).startsWith(
+          'https://portaldoaluno.microlins.com.br/autenticacao/tokenAluno/'
+        )
+      ) {
+        portalSession.authLinksCache[r.contrato] = String(r.linkLoginUrl);
+      }
       const cached = educatorsMap.get(r.contrato);
       const cleanSala = String(r.sala || '').split(' - ')[0].trim() || 'Sala não informada';
       return {
@@ -234,6 +243,15 @@ function seedSchoolCacheFromDbAndSupabase(schoolId: string = currentActiveSchool
     .then(async (remoteRecords) => {
       if (remoteRecords && remoteRecords.length > 0) {
         portalSession.cachedAllWeekRecords = remoteRecords.map((r) => {
+          if (
+            r.contrato &&
+            r.linkLoginUrl &&
+            String(r.linkLoginUrl).startsWith(
+              'https://portaldoaluno.microlins.com.br/autenticacao/tokenAluno/'
+            )
+          ) {
+            portalSession.authLinksCache[r.contrato] = String(r.linkLoginUrl);
+          }
           const cached = educatorsMap.get(r.contrato);
           const cleanSala = String(r.sala || '').split(' - ')[0].trim() || 'Sala não informada';
           return {
@@ -448,6 +466,8 @@ async function parsePortalJsonResponse<T>(res: Response): Promise<T | null> {
   }
 }
 
+const noPasswordContractsCache = new Set<string>();
+
 async function fetchContractAuthLinkFromPortal(
   contrato: string
 ): Promise<string | null> {
@@ -463,6 +483,9 @@ async function fetchContractAuthLinkFromPortal(
     !/\/tokenAluno\/\d+\/?$/.test(existing)
   ) {
     return existing;
+  }
+  if (noPasswordContractsCache.has(cleanContrato)) {
+    return null;
   }
 
   const loggedIn = await authenticatePortalSession(false);
@@ -485,7 +508,11 @@ async function fetchContractAuthLinkFromPortal(
       }
     );
     if (!res.ok) return null;
-    const data = (await res.json()) as { link?: string };
+    const data = (await res.json()) as {
+      link?: string;
+      status?: string;
+      msg?: string;
+    };
     if (
       data &&
       typeof data.link === 'string' &&
@@ -497,12 +524,71 @@ async function fetchContractAuthLinkFromPortal(
       portalSession.authLinksCache[cleanContrato] = validUrl;
       return validUrl;
     }
+    if (data && data.status === 'erro') {
+      noPasswordContractsCache.add(cleanContrato);
+    }
     return null;
   } catch {
     return null;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function syncAllContractsAuthLinksFromPortal(
+  contracts: string[]
+): Promise<number> {
+  const uniqueMissing = Array.from(
+    new Set(
+      contracts
+        .map((c) => String(c || '').trim())
+        .filter(
+          (c) =>
+            c.length > 0 &&
+            !noPasswordContractsCache.has(c) &&
+            !(
+              portalSession.authLinksCache[c] &&
+              portalSession.authLinksCache[c].startsWith(
+                'https://portaldoaluno.microlins.com.br/autenticacao/tokenAluno/'
+              )
+            )
+        )
+    )
+  );
+  if (uniqueMissing.length === 0) return 0;
+
+  const loggedIn = await authenticatePortalSession(false);
+  if (!loggedIn) return 0;
+
+  let resolvedCount = 0;
+  const chunkSize = 30;
+  for (let i = 0; i < uniqueMissing.length; i += chunkSize) {
+    const chunk = uniqueMissing.slice(i, i + chunkSize);
+    const results = await Promise.all(
+      chunk.map((c) => fetchContractAuthLinkFromPortal(c))
+    );
+    for (const r of results) {
+      if (r) resolvedCount++;
+    }
+  }
+
+  if (resolvedCount > 0) {
+    for (const rec of portalSession.cachedAllWeekRecords) {
+      const tokenUrl = portalSession.authLinksCache[rec.contrato];
+      if (tokenUrl) {
+        rec.linkLoginUrl = tokenUrl;
+      }
+    }
+    for (const [, dayEntry] of portalSession.cachedBySemana) {
+      for (const rec of dayEntry.records) {
+        const tokenUrl = portalSession.authLinksCache[rec.contrato];
+        if (tokenUrl) {
+          rec.linkLoginUrl = tokenUrl;
+        }
+      }
+    }
+  }
+  return resolvedCount;
 }
 
 interface EducatorSyncProgress {
@@ -843,7 +929,10 @@ function mapRawPortalItemToRecord(
     id: idx + 1,
     contrato,
     aulaId: String(
-      item.CodigoAulasRealizadas || item.CodigoPresencaFalta || cccm || idx + 1
+      item.Codigo ||
+        item.CodigoAulasRealizadas ||
+        item.CodigoPresencaFalta ||
+        (cccm ? `${cccm}-${idx + 1}` : idx + 1)
     ),
     nomeCompleto,
     nomeCurto,
@@ -872,6 +961,12 @@ function mapRawPortalItemToRecord(
     infoAula,
     status,
     presencaOuFalta,
+    statusSistema:
+      presencaOuFalta === 'P'
+        ? 'PRESENCA'
+        : presencaOuFalta === 'F'
+          ? 'FALTA'
+          : 'NAO_REGISTRADO',
     inadimplente: parcelasAtrasadas > 0,
     parcelasAtrasadas,
     diaSemana: diaLabel,
@@ -961,7 +1056,7 @@ async function fetchSingleWeekdayPortalRecords(
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8500);
+  const timeout = setTimeout(() => controller.abort(), 12000);
   try {
     let { rAlunos, rNotas } = await executePortalDayFetchPair(
       semanaCode,
@@ -1010,6 +1105,7 @@ async function fetchSingleWeekdayPortalRecords(
           Record<string, { Aula?: string; UltimaNota?: string }>
         >(rNotas)) || {}
       : {};
+    clearTimeout(timeout);
 
     if (!dados || !Array.isArray(dados.listaAlunos)) {
       recordSyncLog({
@@ -1035,12 +1131,13 @@ async function fetchSingleWeekdayPortalRecords(
       mapRawPortalItemToRecord(item, idx, diaLabel, notasDict, educatorsMap)
     );
 
-    // Reconcilia com os registros já armazenados deste dia para nunca perder presenças confirmadas
+    // Reconcilia com os registros já armazenados deste dia usando o Portal do Aluno como referência 100% autoritativa
     const storedDayRecords = cached?.records || [];
     const reconciliation = comparePortalWithStoredRecords(
       rawMapped,
       storedDayRecords,
-      currentActiveSchoolId
+      currentActiveSchoolId,
+      { strictPortalAuthority: true }
     );
     const mapped = reconciliation.reconciledRecords;
 
@@ -1062,10 +1159,9 @@ async function fetchSingleWeekdayPortalRecords(
       durationMs: Date.now() - startMs,
     });
 
-    // Rebuild combined weekly cache without duplicates and always persist live updates to Supabase
+    // Rebuild combined weekly cache in memory
     const combined: StudentPerformanceRecord[] = [];
     let globalId = 1;
-    let populatedWeekdaysCount = 0;
     for (const code of ['1', '2', '3', '4', '5', '6', '7']) {
       const codeDiaLabel = PORTAL_WEEKDAY_MAP[code];
       const dayEntry = portalSession.cachedBySemana.get(code);
@@ -1077,32 +1173,17 @@ async function fetchSingleWeekdayPortalRecords(
                 (r) => r.diaSemana === codeDiaLabel
               )
             : [];
-      if (code !== '7' && dayRecords.length > 0) {
-        populatedWeekdaysCount++;
-      }
       for (const rec of dayRecords) {
-        combined.push({ ...rec, id: globalId++ });
+        const tokenUrl = portalSession.authLinksCache[rec.contrato];
+        combined.push({
+          ...rec,
+          id: globalId++,
+          ...(tokenUrl ? { linkLoginUrl: tokenUrl } : {}),
+        });
       }
     }
     if (combined.length > 0) {
       portalSession.cachedAllWeekRecords = combined;
-      if (populatedWeekdaysCount >= 6 || combined.length >= 600) {
-        try {
-          upsertStudentRecordsInDb(
-            combined,
-            currentActiveSchoolId,
-            PORTAL_MICROLINS_ESCOLA,
-            portalSession.cachedMetadata.unidade
-          );
-        } catch {}
-        await replaceStudentRecordsInSupabase(
-          combined,
-          currentActiveSchoolId,
-          PORTAL_MICROLINS_ESCOLA
-        ).catch((err) => {
-          console.error('[Portal Sync] Erro na substituição atômica de alunos:', err);
-        });
-      }
     }
 
     return {
@@ -1119,7 +1200,7 @@ async function fetchSingleWeekdayPortalRecords(
       durationMs: Date.now() - startMs,
       errorMessage: err?.message || 'Exceção ao consultar Portal do Aluno.',
     });
-    if (cached) {
+    if (cached && cached.records.length > 0) {
       return { records: cached.records, source: 'LOCAL_CACHE_SYNC' };
     }
     const dbFallback = getStudentRecordsFromDb(currentActiveSchoolId).filter(
@@ -1161,13 +1242,20 @@ async function syncLivePortalRecords(semanaParam?: string): Promise<{
     }
   }
 
-  const targetDayEntry = portalSession.cachedBySemana.get(targetCode);
+  const allWeekdaysFresh = ['1', '2', '3', '4', '5', '6'].every((code) => {
+    const entry = portalSession.cachedBySemana.get(code);
+    return Boolean(
+      entry &&
+        entry.fetchedAt > 0 &&
+        entry.records.length > 0 &&
+        now - entry.fetchedAt < LIVE_SYNC_CACHE_TTL_MS
+    );
+  });
+
   if (
     portalSession.cachedAllWeekRecords.length > 0 &&
     now - lastLiveSyncTime < LIVE_SYNC_CACHE_TTL_MS &&
-    targetDayEntry &&
-    targetDayEntry.fetchedAt > 0 &&
-    now - targetDayEntry.fetchedAt < LIVE_SYNC_CACHE_TTL_MS
+    allWeekdaysFresh
   ) {
     const enrichedAllWeek = portalSession.cachedAllWeekRecords.map((r) => {
       const causa = r.contrato ? getContractMaterialCauseOverlay(r.contrato) : undefined;
@@ -1180,17 +1268,23 @@ async function syncLivePortalRecords(semanaParam?: string): Promise<{
     };
   }
 
-  const syncKey = `${currentActiveSchoolId}:${targetCode}`;
+  const syncKey = `${currentActiveSchoolId}:ALL_WEEK`;
   const existingInFlight = inFlightLiveSyncByKey.get(syncKey);
   if (existingInFlight) {
     return existingInFlight;
   }
 
   const runSync = async () => {
-    // Identifica todos os dias úteis (1..6) que precisam ser sincronizados e dispara em uma ÚNICA onda paralela (~650ms para a semana inteira)
-    const unfetchedCodes = ['1', '2', '3', '4', '5', '6'].filter((code) => {
+    const nowMs = Date.now();
+    // Identifica todos os dias úteis (1..6) que precisam ser sincronizados ou cujo cache está vazio/expirou (45s) e dispara em uma ÚNICA onda paralela
+    const staleCodes = ['1', '2', '3', '4', '5', '6'].filter((code) => {
       const entry = portalSession.cachedBySemana.get(code);
-      return !entry || entry.fetchedAt === 0;
+      return (
+        !entry ||
+        entry.fetchedAt === 0 ||
+        entry.records.length === 0 ||
+        nowMs - entry.fetchedAt >= 45_000
+      );
     });
 
     let liveDayResult: {
@@ -1198,10 +1292,11 @@ async function syncLivePortalRecords(semanaParam?: string): Promise<{
       source: 'PORTAL_LIVE_VERIFIED' | 'LOCAL_CACHE_SYNC';
     };
 
-    if (unfetchedCodes.length > 0 && !initialFullWeekLiveSyncInFlight) {
+    if (staleCodes.length > 0 && !initialFullWeekLiveSyncInFlight) {
       initialFullWeekLiveSyncInFlight = true;
       try {
-        const codesToFetch = Array.from(new Set([targetCode, ...unfetchedCodes]));
+        await authenticatePortalSession(false);
+        const codesToFetch = Array.from(new Set([targetCode, ...staleCodes]));
         const batchResults = await Promise.all(
           codesToFetch.map(async (c) => ({
             code: c,
@@ -1214,12 +1309,22 @@ async function syncLivePortalRecords(semanaParam?: string): Promise<{
           : batchResults[0]?.res || { records: [], source: 'LOCAL_CACHE_SYNC' };
 
         if (portalSession.cachedAllWeekRecords.length > 0) {
+          await syncAllContractsAuthLinksFromPortal(
+            portalSession.cachedAllWeekRecords.map((r) => r.contrato)
+          ).catch(() => 0);
+          for (const rec of portalSession.cachedAllWeekRecords) {
+            const tokenUrl = portalSession.authLinksCache[rec.contrato];
+            if (tokenUrl) {
+              rec.linkLoginUrl = tokenUrl;
+            }
+          }
           try {
             upsertStudentRecordsInDb(
               portalSession.cachedAllWeekRecords,
               currentActiveSchoolId,
               PORTAL_MICROLINS_ESCOLA,
-              portalSession.cachedMetadata.unidade
+              portalSession.cachedMetadata.unidade,
+              true
             );
           } catch {}
           await replaceStudentRecordsInSupabase(
@@ -1982,6 +2087,7 @@ async function startServer() {
         },
         records: portalResult.allWeekRecords,
         dayRecords: portalResult.records,
+        allWeekRecords: portalResult.allWeekRecords,
         activeNpsInvitations: npsResult.invitations,
       });
     } catch {
@@ -2001,6 +2107,7 @@ async function startServer() {
         },
         records: portalSession.cachedAllWeekRecords,
         dayRecords: portalSession.cachedAllWeekRecords,
+        allWeekRecords: portalSession.cachedAllWeekRecords,
         activeNpsInvitations: indecxSession.cachedActiveInvitations,
       });
     }

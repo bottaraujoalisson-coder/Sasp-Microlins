@@ -121,7 +121,7 @@ function computeRecordsSignature(list: StudentPerformanceRecord[]): string {
   let sig = `${list.length}:`;
   for (let i = 0; i < list.length; i++) {
     const r = list[i];
-    sig += `${r.id}:${r.status}:${r.presencaOuFalta || ''}:${r.inicio || ''}:${r.fim || ''}:${r.email || ''}:${r.causaFaltaMaterialExplicita || ''}|`;
+    sig += `${r.id}:${r.contrato}:${r.diaSemana}:${r.horaInicio}:${r.status}:${r.presencaOuFalta || ''}:${r.inicio || ''}:${r.fim || ''}:${r.infoAula || ''}:${r.nota ?? ''}:${r.aulaNumero ?? ''}:${r.possuiApostila ? 1 : 0}:${r.educador || ''}:${r.email || ''}:${r.causaFaltaMaterialExplicita || ''}|`;
   }
   return sig;
 }
@@ -598,7 +598,25 @@ export default function App() {
       const querySuffix = semanaCode
         ? `?semana=${encodeURIComponent(semanaCode)}`
         : '';
-      const res = await fetch(`/api/microlins/sync${querySuffix}`);
+      let res = await fetch(`/api/microlins/sync${querySuffix}`, {
+        cache: 'no-store',
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('application/json')) {
+        try {
+          const fallbackRes = await fetch(
+            `/.netlify/functions/microlins-sync${querySuffix}`,
+            { cache: 'no-store' }
+          );
+          const fallbackContentType =
+            fallbackRes.headers.get('content-type') || '';
+          if (fallbackRes.ok && fallbackContentType.includes('application/json')) {
+            res = fallbackRes;
+          }
+        } catch {
+          // Fallback to Supabase below if Netlify function is unreachable
+        }
+      }
       const nextWeekday =
         getSimulatedWeekdayOverrideFromUrl() || getCurrentBrasiliaWeekdayLabel();
       setCurrentBrasiliaWeekday((prev) =>
@@ -606,7 +624,10 @@ export default function App() {
       );
       const urlTimeOverride = getSimulatedTimeOverrideFromUrl();
 
-      if (res.ok) {
+      if (
+        res.ok &&
+        (res.headers.get('content-type') || '').includes('application/json')
+      ) {
         const payload = await res.json();
         if (Array.isArray(payload.records) && payload.records.length > 0) {
           const incomingRecords: StudentPerformanceRecord[] = payload.records;
@@ -932,16 +953,30 @@ export default function App() {
     ]
   );
 
-  // Opções de horários dos alunos elegíveis no NPS
+  // Cards do dia selecionado (para opções de horário e denominador do card de convites)
+  const npsDayFilteredCards = useMemo(() => {
+    if (npsDiaSemana === 'TODOS') return synchronizedNpsStudentCards;
+    return filterSynchronizedNpsCards(synchronizedNpsStudentCards, {
+      search: '',
+      origem: 'TODAS',
+      pontoJornada: 'TODOS',
+      horario: 'TODOS',
+      diaSemana: npsDiaSemana,
+      emailDeliveryStatus: 'TODOS',
+      destinatarioFilter: 'TODOS',
+    });
+  }, [synchronizedNpsStudentCards, npsDiaSemana]);
+
+  // Opções de horários dos alunos elegíveis no NPS no dia selecionado
   const npsHorarioOptions = useMemo(() => {
     const hours = new Set<number>();
-    for (const card of synchronizedNpsStudentCards) {
+    for (const card of npsDayFilteredCards) {
       hours.add(card.linkedHourNumber);
     }
     return Array.from(hours)
       .sort((a, b) => a - b)
       .map((h) => `${String(h).padStart(2, '0')}h`);
-  }, [synchronizedNpsStudentCards]);
+  }, [npsDayFilteredCards]);
 
   // Cards de alunos NPS filtrados (sem barra de pesquisa)
   const npsFilteredCards = useMemo(() => {
@@ -965,11 +1000,69 @@ export default function App() {
     npsDestinatarioFilter,
   ]);
 
-  // Indicadores de resumo da aba NPS
-  const npsKPIs = useMemo(
-    () => computeNpsSummaryKPIs(npsFilteredCards),
-    [npsFilteredCards]
-  );
+  // Indicadores de resumo da aba NPS com cross-filtering para não zerar cards irmãos ao filtrar
+  const npsKPIs = useMemo(() => {
+    const baseKPIs = computeNpsSummaryKPIs(npsFilteredCards);
+    const byOrigemPool = filterSynchronizedNpsCards(synchronizedNpsStudentCards, {
+      search: '',
+      origem: 'TODAS',
+      pontoJornada: npsPontoJornada,
+      horario: npsHorario,
+      diaSemana: npsDiaSemana,
+      emailDeliveryStatus: npsDeliveryStatus,
+      destinatarioFilter: npsDestinatarioFilter,
+    });
+    const origemKPIs = computeNpsSummaryKPIs(byOrigemPool);
+
+    const byDestinatarioPool = filterSynchronizedNpsCards(
+      synchronizedNpsStudentCards,
+      {
+        search: '',
+        origem: npsOrigem,
+        pontoJornada: npsPontoJornada,
+        horario: npsHorario,
+        diaSemana: npsDiaSemana,
+        emailDeliveryStatus: npsDeliveryStatus,
+        destinatarioFilter: 'TODOS',
+      }
+    );
+    const destinatarioKPIs = computeNpsSummaryKPIs(byDestinatarioPool);
+
+    const byDeliveryPool = filterSynchronizedNpsCards(
+      synchronizedNpsStudentCards,
+      {
+        search: '',
+        origem: npsOrigem,
+        pontoJornada: npsPontoJornada,
+        horario: npsHorario,
+        diaSemana: npsDiaSemana,
+        emailDeliveryStatus: 'TODOS',
+        destinatarioFilter: npsDestinatarioFilter,
+      }
+    );
+    const deliveryKPIs = computeNpsSummaryKPIs(byDeliveryPool);
+
+    return {
+      ...baseKPIs,
+      portalDoAlunoCount: origemKPIs.portalDoAlunoCount,
+      emailCount: origemKPIs.emailCount,
+      destinatarioAlunoCount: destinatarioKPIs.destinatarioAlunoCount,
+      destinatarioResponsavelCount: destinatarioKPIs.destinatarioResponsavelCount,
+      emailAbertoCount: deliveryKPIs.emailAbertoCount,
+      emailEntregueCount: deliveryKPIs.emailEntregueCount,
+      emailEnviadoCount: deliveryKPIs.emailEnviadoCount,
+      emailNaoEntregueCount: deliveryKPIs.emailNaoEntregueCount,
+    };
+  }, [
+    npsFilteredCards,
+    synchronizedNpsStudentCards,
+    npsOrigem,
+    npsPontoJornada,
+    npsHorario,
+    npsDiaSemana,
+    npsDeliveryStatus,
+    npsDestinatarioFilter,
+  ]);
 
   // Relação de dia para as colunas do Kanban NPS (sincronizada com o dia de Brasília)
   const npsDayRelation = useMemo(() => {

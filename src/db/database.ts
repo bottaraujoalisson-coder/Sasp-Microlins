@@ -1872,8 +1872,10 @@ function buildRecordSlotKey(rec: Record<string, any>): string {
 export function comparePortalWithStoredRecords<T extends Record<string, any>>(
   portalRecords: T[],
   storedRecords: T[],
-  schoolId: string = 'school-1875'
+  schoolId: string = 'school-1875',
+  options?: { strictPortalAuthority?: boolean }
 ): PortalReconciliationReport<T> {
+  const strictPortalAuthority = Boolean(options?.strictPortalAuthority);
   const storedBySlot = new Map<string, T>();
   const storedByTimeSlot = new Map<string, T>();
   for (const st of storedRecords) {
@@ -1903,7 +1905,7 @@ export function comparePortalWithStoredRecords<T extends Record<string, any>>(
     const diaSemana = String(incoming.diaSemana || '').trim();
     const horaInicio = String(incoming.horaInicio || '').trim();
     const slotKey = buildRecordSlotKey(incoming);
-    if (slotKey) {
+    if (slotKey && !strictPortalAuthority) {
       if (seenSlots.has(slotKey)) {
         continue;
       }
@@ -1944,7 +1946,11 @@ export function comparePortalWithStoredRecords<T extends Record<string, any>>(
       Boolean(incoming.inicio) ||
       Boolean(incoming.fim);
 
-    if (existingHasConfirmedPresence && !incomingHasPresenceOrAbsence) {
+    if (
+      !strictPortalAuthority &&
+      existingHasConfirmedPresence &&
+      !incomingHasPresenceOrAbsence
+    ) {
       preservedPresencesCount++;
       divergences.push({
         contrato,
@@ -1955,6 +1961,18 @@ export function comparePortalWithStoredRecords<T extends Record<string, any>>(
       });
       const preservedInicio = existing.inicio || incoming.inicio || '';
       const preservedFim = existing.fim || incoming.fim || '';
+      const preservedLinkLoginUrl =
+        incoming.linkLoginUrl &&
+        String(incoming.linkLoginUrl).startsWith(
+          'https://portaldoaluno.microlins.com.br/autenticacao/tokenAluno/'
+        )
+          ? incoming.linkLoginUrl
+          : existing.linkLoginUrl &&
+              String(existing.linkLoginUrl).startsWith(
+                'https://portaldoaluno.microlins.com.br/autenticacao/tokenAluno/'
+              )
+            ? existing.linkLoginUrl
+            : incoming.linkLoginUrl || existing.linkLoginUrl;
       reconciledRecords.push({
         ...incoming,
         presencaOuFalta:
@@ -1969,6 +1987,7 @@ export function comparePortalWithStoredRecords<T extends Record<string, any>>(
           : preservedInicio && existing.status !== 'FINALIZADO'
             ? 'INICIADO'
             : existing.status || 'FINALIZADO',
+        linkLoginUrl: preservedLinkLoginUrl,
         educador: incoming.educador || existing.educador,
         educadorCachedAt:
           incoming.educadorCachedAt || existing.educadorCachedAt,
@@ -1997,8 +2016,22 @@ export function comparePortalWithStoredRecords<T extends Record<string, any>>(
       });
     }
 
+    const resolvedLinkLoginUrl =
+      incoming.linkLoginUrl &&
+      String(incoming.linkLoginUrl).startsWith(
+        'https://portaldoaluno.microlins.com.br/autenticacao/tokenAluno/'
+      )
+        ? incoming.linkLoginUrl
+        : existing.linkLoginUrl &&
+            String(existing.linkLoginUrl).startsWith(
+              'https://portaldoaluno.microlins.com.br/autenticacao/tokenAluno/'
+            )
+          ? existing.linkLoginUrl
+          : incoming.linkLoginUrl || existing.linkLoginUrl;
+
     reconciledRecords.push({
       ...incoming,
+      linkLoginUrl: resolvedLinkLoginUrl,
       educador: incoming.educador || existing.educador,
       educadorCachedAt: incoming.educadorCachedAt || existing.educadorCachedAt,
       schoolId,
@@ -2035,7 +2068,8 @@ export function upsertStudentRecordsInDb<T extends Record<string, any>>(
   const { reconciledRecords } = comparePortalWithStoredRecords(
     records,
     existingRecords,
-    cleanSchoolId
+    cleanSchoolId,
+    { strictPortalAuthority: replaceForSchool }
   );
 
   const finalRecords: Record<string, any>[] = [...reconciledRecords];

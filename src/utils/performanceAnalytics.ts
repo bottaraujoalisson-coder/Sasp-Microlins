@@ -251,18 +251,25 @@ export function getBrasiliaCurrentMinutes(
   timeStrOrDate?: string | Date
 ): number {
   if (typeof timeStrOrDate === 'string' && timeStrOrDate.trim() !== '') {
-    const [hStr = '0', mStr = '0'] = timeStrOrDate.trim().split(':');
-    const h = parseInt(hStr, 10);
-    const m = parseInt(mStr, 10);
-    if (!Number.isNaN(h) && !Number.isNaN(m)) {
-      const normalizedH = ((h % 24) + 24) % 24;
-      const normalizedM = Math.max(0, Math.min(59, m));
-      return normalizedH * 60 + normalizedM;
+    const cleanStr = timeStrOrDate.trim();
+    if (/^\d{1,2}:\d{2}/.test(cleanStr)) {
+      const [hStr = '0', mStr = '0'] = cleanStr.split(':');
+      const h = parseInt(hStr, 10);
+      const m = parseInt(mStr, 10);
+      if (!Number.isNaN(h) && !Number.isNaN(m)) {
+        const normalizedH = ((h % 24) + 24) % 24;
+        const normalizedM = Math.max(0, Math.min(59, m));
+        return normalizedH * 60 + normalizedM;
+      }
     }
   }
 
   const refDate =
-    timeStrOrDate instanceof Date ? timeStrOrDate : new Date();
+    timeStrOrDate instanceof Date
+      ? timeStrOrDate
+      : typeof timeStrOrDate === 'string' && timeStrOrDate.trim() !== '' && !Number.isNaN(Date.parse(timeStrOrDate))
+        ? new Date(timeStrOrDate)
+        : new Date();
 
   try {
     const parts = BRASILIA_TIME_PARTS_FORMATTER.formatToParts(refDate);
@@ -1598,7 +1605,7 @@ export function evaluateStudentAttendance(
   const hasClassTimeArrivedInWeek =
     dayRelation === 'PAST_DAY' ||
     hasStartedEarlyToday ||
-    (dayRelation !== 'FUTURE_DAY' && hasSystemPresence) ||
+    hasSystemPresence ||
     (dayRelation === 'CURRENT_DAY' &&
       currentTimeMinutes >= scheduledStartMinutes);
 
@@ -1612,15 +1619,15 @@ export function evaluateStudentAttendance(
       rawInfoAulaStr === 'FALTA');
 
   // Regra 5.2: Proteção contra falso-positivo de falta quando a sincronização do período ainda não ocorreu
-  // ou quando o registro está explicitamente marcado como NAO_REGISTRADO sem fechamento confirmado do período.
+  // ou quando o lote/turno inteiro do dia não possui nenhum fechamento/confirmação registrado no Portal.
   const isExplicitlyUnsynced =
-    record.statusSistema === 'NAO_REGISTRADO' ||
-    (!hasPeriodClosureConfirmed &&
-      !hasSystemPresence &&
-      !hasSystemAbsence &&
-      (rawInfoAulaStr === 'NÃO REGISTRADO' ||
-        rawInfoAulaStr === 'NAO REGISTRADO' ||
-        rawInfoAulaStr === ''));
+    !hasPeriodClosureConfirmed &&
+    !hasSystemPresence &&
+    !hasSystemAbsence &&
+    (record.statusSistema === 'NAO_REGISTRADO' ||
+      rawInfoAulaStr === 'NÃO REGISTRADO' ||
+      rawInfoAulaStr === 'NAO REGISTRADO' ||
+      rawInfoAulaStr === '');
 
   let attendanceStatus: AttendanceStatus;
   let scheduleStage: ScheduleStage;
@@ -1643,13 +1650,13 @@ export function evaluateStudentAttendance(
       scheduleStage = 'HORARIO_FUTURO';
       scheduleStageLabel = 'Não iniciada';
     }
-  } else if (hasSystemPresence && dayRelation !== 'FUTURE_DAY') {
-    // Se o sistema informa PRESENÇA confirmada (inclusive aula iniciada adiantada antes do horário agendado), contabiliza Presença imediatamente
+  } else if (hasSystemPresence) {
+    // Se o Portal do Aluno informa PRESENÇA confirmada, contabiliza Presença imediatamente em 100% de paridade com o Portal
     attendanceStatus = 'Presença';
     scheduleStage = 'CONCLUIDO';
     scheduleStageLabel = 'Presença';
-  } else if (hasSystemAbsence && dayRelation !== 'FUTURE_DAY') {
-    // Se o sistema informa FALTA explícita confirmada, contabiliza Falta imediatamente
+  } else if (hasSystemAbsence) {
+    // Se o Portal do Aluno informa FALTA explícita confirmada, contabiliza Falta imediatamente em 100% de paridade com o Portal
     attendanceStatus = 'Falta';
     scheduleStage = 'FALTA_CONTABILIZADA';
     scheduleStageLabel = 'Falta';
@@ -1752,22 +1759,26 @@ export function evaluateStudentAttendance(
       )
     : '';
 
-  const effectiveRecordStatus: ClassStatus = !hasClassTimeArrivedInWeek
-    ? 'NÃO INICIADO'
-    : hasSystemPresence
-    ? Boolean(record.fim && record.fim.trim() !== '') || rawStatusStr === 'FINALIZADO'
-      ? 'FINALIZADO'
-      : Boolean(record.inicio && record.inicio.trim() !== '') || rawStatusStr === 'INICIADO'
-      ? 'INICIADO'
-      : 'FINALIZADO'
-    : record.status;
-  const effectiveInicio = !hasClassTimeArrivedInWeek ? '' : record.inicio;
-  const effectiveFim = !hasClassTimeArrivedInWeek ? '' : record.fim;
-  const effectivePresencaOuFalta = !hasClassTimeArrivedInWeek
-    ? ''
-    : hasSystemPresence
-    ? 'P'
-    : record.presencaOuFalta;
+  const effectiveRecordStatus: ClassStatus =
+    !hasClassTimeArrivedInWeek || isExplicitlyUnsynced
+      ? 'NÃO INICIADO'
+      : hasSystemPresence
+      ? Boolean(record.fim && record.fim.trim() !== '') || rawStatusStr === 'FINALIZADO'
+        ? 'FINALIZADO'
+        : Boolean(record.inicio && record.inicio.trim() !== '') || rawStatusStr === 'INICIADO'
+        ? 'INICIADO'
+        : 'FINALIZADO'
+      : record.status;
+  const effectiveInicio =
+    !hasClassTimeArrivedInWeek || isExplicitlyUnsynced ? '' : record.inicio;
+  const effectiveFim =
+    !hasClassTimeArrivedInWeek || isExplicitlyUnsynced ? '' : record.fim;
+  const effectivePresencaOuFalta =
+    !hasClassTimeArrivedInWeek || isExplicitlyUnsynced
+      ? ''
+      : hasSystemPresence
+      ? 'P'
+      : record.presencaOuFalta;
 
   // Item 1.1: Parcelas em Atraso preservadas internamente (ex.: 0, 1, 3, 6...), mantendo indicador estritamente binário na UI pedagógica
   const deterministicOverdueInstallments = (() => {
@@ -1948,17 +1959,21 @@ export function evaluateAllStudentsAttendance(
       ? referenceWeekday.trim()
       : getCurrentBrasiliaWeekdayLabel();
 
-  // Verificar fechamento/sincronização por (diaSemana, turno) para evitar que um turno inteiro
-  // ainda não sincronizado pelo Portal no dia atual (ex: 100% dos registros do turno da Tarde com
-  // infoAula === 'Não registrado' e sem nenhum P/F) transforme todos os alunos da tarde em Falta.
+  // Verificar fechamento/sincronização por diaSemana e por (diaSemana, turno) para garantir 100% de fidelidade
+  // com o Portal do Aluno: quando um dia inteiro ou turno inteiro no Portal possui >= 3 alunos agendados e ZERO
+  // registros de presença ou falta (ex.: Segunda-feira ou Sábado com 0 P e 0 F no Portal do Aluno), esses alunos
+  // estão como "Não iniciada" no Portal e não devem ser transformados em faltas artificiais.
   const shiftStats = new Map<string, { total: number; confirmed: number }>();
+  const dayStats = new Map<string, { total: number; confirmed: number }>();
   for (const r of records) {
     const day = (r.diaSemana || PORTAL_METADATA.diaSemana).trim();
     const startH = extractRecordStartHour(r, 'AGENDADO') ?? 8;
     const shift = r.turno || (startH < 12 ? 'Manhã' : startH < 18 ? 'Tarde' : 'Noite');
     const shiftKey = `${day}::${shift}`;
     const entry = shiftStats.get(shiftKey) || { total: 0, confirmed: 0 };
+    const dayEntry = dayStats.get(day) || { total: 0, confirmed: 0 };
     entry.total++;
+    dayEntry.total++;
     const infoLower = String(r.infoAula || '').trim().toLowerCase();
     const hasConfirmedPortalSignal =
       r.presencaOuFalta === 'P' ||
@@ -1972,8 +1987,10 @@ export function evaluateAllStudentsAttendance(
       (infoLower !== '' && infoLower !== 'não registrado' && infoLower !== 'nao registrado');
     if (hasConfirmedPortalSignal) {
       entry.confirmed++;
+      dayEntry.confirmed++;
     }
     shiftStats.set(shiftKey, entry);
+    dayStats.set(day, dayEntry);
   }
 
   for (const r of records) {
@@ -1984,11 +2001,12 @@ export function evaluateAllStudentsAttendance(
     const shift = r.turno || (startH < 12 ? 'Manhã' : startH < 18 ? 'Tarde' : 'Noite');
     const shiftKey = `${day}::${shift}`;
     const st = shiftStats.get(shiftKey);
-    const dayRel = compareWeekdayWithCurrent(day, effectiveRefWeekday);
-    // Se estamos no dia atual (CURRENT_DAY) em um turno com >= 3 alunos agendados e ZERO confirmações do Portal
-    // (todos "Não registrado"), o turno ainda não foi sincronizado/fechado pelo Portal.
+    const dSt = dayStats.get(day);
+    // Se o dia inteiro ou turno inteiro no Portal do Aluno possui >= 3 alunos agendados e ZERO confirmações de P/F
+    // (todos "Não registrado" no Portal), mantém como Não iniciada (0 Presenças, 0 Faltas), espelhando 100% o Portal do Aluno.
     const hasPeriodClosureConfirmed =
-      dayRel === 'CURRENT_DAY' && st && st.total >= 3 && st.confirmed === 0
+      (st && st.total >= 3 && st.confirmed === 0) ||
+      (dSt && dSt.total >= 3 && dSt.confirmed === 0)
         ? false
         : true;
 
@@ -2227,12 +2245,22 @@ export function buildSynchronizedNpsStudentCards(
         ? schedulesByEmail.get(invEmail)
         : undefined;
 
-    const matchedSchedules =
+    const baseMatchedSchedules =
       matchedByContrato ||
       matchedByName ||
       matchedByResponsavel ||
       matchedByEmail ||
       [];
+
+    // Se o aluno possui múltiplos contratos/agendamentos com o mesmo nome na unidade, consolida todos os horários dele
+    const sameStudentSchedules =
+      matchedByContrato && normInvName
+        ? schedulesByNormName.get(normInvName)
+        : undefined;
+    const matchedSchedules =
+      sameStudentSchedules && sameStudentSchedules.length > baseMatchedSchedules.length
+        ? Array.from(new Set([...baseMatchedSchedules, ...sameStudentSchedules]))
+        : baseMatchedSchedules;
 
     // Se o convite não possuir vínculo em nenhum dos 4 níveis no Kanban de Alunos, não entra no painel sincronizado
     if (matchedSchedules.length === 0) {
@@ -2275,12 +2303,17 @@ export function buildSynchronizedNpsStudentCards(
 
     const canonicalKey = isMultiSiblingFamily
       ? `familia::${normInvName}`
-      : matchedSchedules[0].contrato ||
-        normalizeStudentName(matchedSchedules[0].nomeCompleto);
+      : normalizeStudentName(matchedSchedules[0].nomeCompleto) ||
+        matchedSchedules[0].contrato;
 
     const existing = historyByCanonicalStudent.get(canonicalKey);
     if (existing) {
       existing.surveys.push(enrichedInv);
+      if (matchedSchedules.length > existing.matchedSchedules.length) {
+        existing.matchedSchedules = Array.from(
+          new Set([...existing.matchedSchedules, ...matchedSchedules])
+        );
+      }
       if (siblingFamilyContext?.isAmbiguous) {
         existing.siblingFamilyContext = siblingFamilyContext;
       }
@@ -3170,7 +3203,7 @@ export function computeNpsSummaryKPIs(
   let emailAbertoCount = 0;
   let emailNaoEntregueCount = 0;
 
-  for (const inv of emailInvitations) {
+  for (const inv of invitations) {
     const { emailDeliveryStatus } = resolveRealNpsDeliveryTracking(inv);
     if (emailDeliveryStatus === 'Aberto') emailAbertoCount++;
     else if (emailDeliveryStatus === 'Entregue') emailEntregueCount++;

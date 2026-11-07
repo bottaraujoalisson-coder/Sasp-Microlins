@@ -963,4 +963,79 @@ describe('Reestruturação Visual, Otimização, Segurança e Correções de Ló
     assert.equal(cols0950[0].presencaCount, 1);
     assert.equal(cols0950[0].iniciados, 1);
   });
+
+  it('Validação 6: Fidelidade 100% com Portal do Aluno — dia inteiro sem registros (0 P e 0 F em >= 3 alunos, ex.: Segunda-feira ou Sábado) permanece 100% Não iniciada sem fabricar faltas', () => {
+    const mondayUnregisteredBatch: StudentPerformanceRecord[] = [
+      makeStudentRecord({
+        id: 960,
+        contrato: '5096001',
+        nomeCompleto: 'ALUNO SEGUNDA 1',
+        diaSemana: 'Segunda-feira',
+        horario: '08:00 à 10:00',
+        horaInicio: '08:00',
+        horaFim: '10:00',
+        turno: 'Manhã',
+        inicio: '',
+        fim: '',
+        status: 'NÃO INICIADO',
+        presencaOuFalta: '',
+        infoAula: 'Não registrado',
+      }),
+      makeStudentRecord({
+        id: 961,
+        contrato: '5096002',
+        nomeCompleto: 'ALUNO SEGUNDA 2',
+        diaSemana: 'Segunda-feira',
+        horario: '09:00 à 11:00',
+        horaInicio: '09:00',
+        horaFim: '11:00',
+        turno: 'Manhã',
+        inicio: '',
+        fim: '',
+        status: 'NÃO INICIADO',
+        presencaOuFalta: '',
+        infoAula: 'Não registrado',
+      }),
+      makeStudentRecord({
+        id: 962,
+        contrato: '5096003',
+        nomeCompleto: 'ALUNO SEGUNDA 3',
+        diaSemana: 'Segunda-feira',
+        horario: '10:00 à 12:00',
+        horaInicio: '10:00',
+        horaFim: '12:00',
+        turno: 'Manhã',
+        inicio: '',
+        fim: '',
+        status: 'NÃO INICIADO',
+        presencaOuFalta: '',
+        infoAula: 'Não registrado',
+      }),
+    ];
+
+    const evaluatedMonday = evaluateAllStudentsAttendance(
+      mondayUnregisteredBatch,
+      15 * 60,
+      {},
+      [],
+      'Sexta-feira'
+    );
+    const kpisMonday = computePerformanceKPIs(
+      evaluatedMonday,
+      15 * 60,
+      {},
+      [],
+      'Sexta-feira'
+    );
+
+    assert.equal(kpisMonday.presencaCount, 0, 'Segunda-feira sem registros no Portal deve ter 0 Presenças');
+    assert.equal(kpisMonday.faltaCount, 0, 'Segunda-feira sem registros no Portal deve ter 0 Faltas');
+    assert.equal(kpisMonday.naoIniciados, 3, 'Todos os 3 alunos devem permanecer como Não iniciada');
+
+    // E verifica parsing de string HH:MM:SS vs ISO em getBrasiliaCurrentMinutes
+    assert.equal(getBrasiliaCurrentMinutes('14:35:00'), 14 * 60 + 35);
+    const isoMinutes = getBrasiliaCurrentMinutes('2026-11-07T15:20:00.000Z');
+    assert.equal(isoMinutes, 12 * 60 + 20);
+  });
 });
+

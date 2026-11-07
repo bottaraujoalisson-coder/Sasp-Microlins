@@ -296,6 +296,38 @@ export const SYSTEM_INDICATORS_HELP: Record<string, IndicatorHelpDefinition> = {
     comoInterpretar:
       'Direciona a ação imediata da coordenação: entregar apostila para quem está em dia e abordar em sala quem compareceu e tem NPS pendente.',
   },
+  NPS_DESTINATARIO: {
+    id: 'NPS_DESTINATARIO',
+    titulo: 'Destinatário do Convite NPS (Aluno / Responsável)',
+    oQueRepresenta:
+      'Classifica os convites NPS ativos conforme o destinatário identificado no cruzamento hierárquico de 4 níveis: o próprio Aluno ou o Responsável legal (inclusive famílias com múltiplos irmãos).',
+    dadosUtilizados:
+      'Cruzamento automático entre os convites ativos do Portal NPS (Indecx) e os contratos/responsáveis do Portal do Aluno.',
+    regraNegocioFormula:
+      'Contabiliza quantos convites ativos pertencem diretamente ao Aluno (nível Contrato/Nome/E-mail) e quantos pertencem ao Responsável legal.',
+    periodoConsiderado:
+      'Ciclo anual vigente no fuso horário de Brasília (America/Sao_Paulo), filtrado pelo dia da semana selecionado.',
+    filtrosQueInfluenciam:
+      'Dia da Semana, Horário, Canal de Origem, Status de Envio e Ciclo da Pesquisa.',
+    comoInterpretar:
+      'Clique em "Aluno" ou "Resp." para filtrar os cards do Kanban NPS e direcionar a abordagem em sala de aula ou via WhatsApp do responsável.',
+  },
+  NPS_STATUS_ENVIO: {
+    id: 'NPS_STATUS_ENVIO',
+    titulo: 'Status de Envio e Rastreio do Convite NPS',
+    oQueRepresenta:
+      'Exibe o funil de entrega dos convites NPS ativos no período selecionado: Abertos, Entregues, Enviados e Não entregues.',
+    dadosUtilizados:
+      'Eventos de disparo, entrega e abertura sincronizados da API Indecx (/v2/company-controls).',
+    regraNegocioFormula:
+      'Classifica cada convite ativo no estágio mais avançado atingido (Aberto > Entregue > Enviado > Não entregue), somando 100% dos convites exibidos.',
+    periodoConsiderado:
+      'Ciclo anual vigente no fuso horário de Brasília (America/Sao_Paulo), filtrado pelo dia da semana selecionado.',
+    filtrosQueInfluenciam:
+      'Dia da Semana, Horário, Canal de Origem, Destinatário e Ciclo da Pesquisa.',
+    comoInterpretar:
+      'Clique em qualquer um dos 4 estágios (Abertos, Entregues, Enviados ou Não entregues) para filtrar imediatamente os cards correspondentes no Kanban NPS.',
+  },
 };
 
 // Mapeamentos de aliases utilizados nos componentes Kanban de Alunos e Kanban NPS
@@ -309,8 +341,8 @@ const INDICATOR_ALIASES: Record<string, string> = {
   nps_total_convites: 'NPS_ELEGIVEIS_DIA',
   nps_portal_aluno: 'NPS_PORTAL_ALUNO',
   nps_por_email: 'NPS_EMAIL_INDECX',
-  nps_destinatario: 'NPS_CICLO_30_DIAS',
-  nps_status_envio: 'NPS_CICLO_50_70_DIAS',
+  nps_destinatario: 'NPS_DESTINATARIO',
+  nps_status_envio: 'NPS_STATUS_ENVIO',
 };
 for (const [aliasKey, targetKey] of Object.entries(INDICATOR_ALIASES)) {
   if (SYSTEM_INDICATORS_HELP[targetKey]) {

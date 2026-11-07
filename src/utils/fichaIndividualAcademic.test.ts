@@ -1,6 +1,7 @@
-import { describe, it } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { getStudentRecordsFromDb } from '../db/database';
+import { getStudentRecordsFromDb, upsertStudentRecordsInDb } from '../db/database';
+import { fetchStudentRecords } from './supabaseClient';
 import { evaluateAllStudentsAttendance } from './performanceAnalytics';
 import {
   buildStudentFichaIndividual,
@@ -11,15 +12,26 @@ import {
 } from './fichaIndividualAcademic';
 
 describe('Ficha Individual do Aluno — Busca e Consolidação Acadêmica Unificada', () => {
-  const dbRecords = getStudentRecordsFromDb('school-1875');
-  const evaluated = evaluateAllStudentsAttendance(
-    dbRecords,
-    18 * 60,
-    {},
-    [],
-    'Sábado'
-  );
-  const directory = buildUniqueStudentDirectory(evaluated);
+  let directory: ReturnType<typeof buildUniqueStudentDirectory> = [];
+
+  before(async () => {
+    let dbRecords = getStudentRecordsFromDb('school-1875');
+    if (dbRecords.length < 50) {
+      const supaRecords = await fetchStudentRecords('school-1875');
+      if (supaRecords && supaRecords.length > 0) {
+        upsertStudentRecordsInDb(supaRecords, 'school-1875', '1875', 'ESCOLA PRESIDENTE PRUDENTE', true);
+        dbRecords = supaRecords;
+      }
+    }
+    const evaluated = evaluateAllStudentsAttendance(
+      dbRecords,
+      18 * 60,
+      {},
+      [],
+      'Sábado'
+    );
+    directory = buildUniqueStudentDirectory(evaluated);
+  });
 
   it('deve consolidar alunos únicos por número de contrato sem duplicatas', () => {
     assert.ok(directory.length > 50, 'Diretório deve conter dezenas de alunos únicos');

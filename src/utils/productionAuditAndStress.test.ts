@@ -390,13 +390,25 @@ test('Seção 5 — Sincronização do Período da Tarde e Proteção contra Fal
   assert.equal(reconciliation.reconciledRecords[0].inicio, '14:03:00');
 });
 
-test('Seções 9, 10 e 15 — Aba Consolidado (Coluna Educador), Filtro Educador no Kanban e Dicionário (?) de Indicadores', () => {
+test('Seções 9, 10 e 15 — Aba Consolidado (Coluna Educador), Filtro Educador no Kanban e Dicionário (?) de Indicadores', async () => {
   // 1. Verificar coluna Educador na tabela do Consolidado
   const educadorCol = CONSOLIDATED_TABLE_COLUMNS.find((c) => c.id === 'educador');
   assert.ok(educadorCol, 'Coluna educador deve existir em CONSOLIDATED_TABLE_COLUMNS');
   assert.equal(educadorCol.label, 'Educador');
 
-  const evaluated = evaluateAllStudentsAttendance(ALL_WEEK_STUDENT_RECORDS, 600);
+  const { fetchStudentRecords } = await import('./supabaseClient');
+  let sourceRecords =
+    ALL_WEEK_STUDENT_RECORDS.length > 0
+      ? ALL_WEEK_STUDENT_RECORDS
+      : getStudentRecordsFromDb('school-1875');
+  if (sourceRecords.length === 0) {
+    const supaRecords = await fetchStudentRecords('school-1875');
+    if (supaRecords && supaRecords.length > 0) {
+      sourceRecords = supaRecords;
+    }
+  }
+
+  const evaluated = evaluateAllStudentsAttendance(sourceRecords, 600);
   const analytics = computeDashboardAnalytics(evaluated, {
     aulaMin: null,
     aulaMax: null,

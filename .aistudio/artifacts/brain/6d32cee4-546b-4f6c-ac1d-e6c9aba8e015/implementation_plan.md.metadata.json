@@ -1,6 +1,6 @@
 {
-  "summary": "Plano de auditoria, correção da exibição de presenças e faltas, e sincronização ao vivo do Portal do Aluno com persistência no Supabase.",
-  "updatedAt": "2026-11-05T13:42:02.621194132Z",
-  "requestFeedback": true,
-  "userFacing": true
+  "summary":  "Relatório Técnico de Auditoria Completa e Correção Integral de Faltas e Sincronização em Produção",
+  "updatedAt":  "2026-11-07T12:30:10.859714164Z",
+  "requestFeedback":  true,
+  "userFacing":  true
 }

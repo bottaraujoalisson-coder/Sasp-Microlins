@@ -612,6 +612,12 @@ function mapSupabaseRowToStudentRecord(
     infoAula: rawInfoAula,
     status: effectiveStatus,
     presencaOuFalta: effectivePresenca,
+    statusSistema:
+      effectivePresenca === 'P'
+        ? 'PRESENCA'
+        : effectivePresenca === 'F'
+          ? 'FALTA'
+          : 'NAO_REGISTRADO',
     inadimplente: Boolean(row.inadimplente),
     parcelasAtrasadas: Number(row.parcelas_atrasadas ?? 0),
     diaSemana: row.dia_semana ?? 'Sexta-feira',
