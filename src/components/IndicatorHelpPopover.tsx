@@ -98,19 +98,19 @@ export const SYSTEM_INDICATORS_HELP: Record<string, IndicatorHelpDefinition> = {
   },
   KANBAN_EVASAO: {
     id: 'KANBAN_EVASAO',
-    titulo: 'Evasão no Dia (Ausência Parcial)',
+    titulo: 'Evasão no Dia (Apurada por Formação)',
     oQueRepresenta:
-      'Alunos com 2 ou mais horários agendados no mesmo dia que compareceram a pelo menos 1 aula, mas se ausentaram de outro horário já encerrado.',
+      'Formações de alunos com 2 ou mais horários agendados no mesmo dia em que o aluno compareceu a pelo menos 1 aula, mas se ausentou de outro horário já encerrado.',
     dadosUtilizados:
-      'Agrupamento de agendamentos por (diaSemana, contrato) com 2+ horários e cruzamento de status Presença × Falta.',
+      'Agrupamento de agendamentos por formação do aluno no mesmo dia com 2+ horários e cruzamento de status Presença × Falta.',
     regraNegocioFormula:
-      'Atribuído quando totalAgendamentosDia >= 2 E presencaCount >= 1 E faltaCount >= 1. Removido automaticamente se a ausência for justificada/convertida em presença.',
+      'O cálculo de evasão é por formação do aluno, não por contrato. Se o aluno tiver mais de uma formação, cada formação é apurada individualmente. Atribuído quando totalAgendamentosDia na formação >= 2, presencaCount >= 1 e faltaCount >= 1. Removido automaticamente se a ausência for justificada/convertida em presença.',
     periodoConsiderado:
       'Dia da semana selecionado no Kanban.',
     filtrosQueInfluenciam:
       'Dia da semana, Sala, Educador, Curso/Módulo, Período, Categoria, Apostila e Financeiro.',
     comoInterpretar:
-      'Alerta imediato de alunos que estavam na escola no 1º horário e saíram antes do 2º horário. Se o aluno faltou a todos os horários, trata-se de falta integral (não evasão).',
+      'Alerta imediato de alunos que estavam na escola no 1º horário de sua formação e saíram antes do 2º horário. Alunos com múltiplas formações (ex: Informática e Inglês) têm cada formação avaliada e contabilizada de forma independente.',
   },
 
   // ==========================================================================
@@ -252,11 +252,11 @@ export const SYSTEM_INDICATORS_HELP: Record<string, IndicatorHelpDefinition> = {
     id: 'CONSOLIDADO_FREQUENCIA_E_EVASOES',
     titulo: 'Frequência Semanal & Evasões',
     oQueRepresenta:
-      'Card duplo: à esquerda exibe a Taxa de Frequência Semanal acumulada (Presenças vs Faltas); à direita exibe o total e percentual de alunos com Evasão na semana.',
+      'Card duplo: à esquerda exibe a Taxa de Frequência Semanal acumulada (Presenças vs Faltas); à direita exibe o total e percentual de formações com Evasão na semana.',
     dadosUtilizados:
-      'Soma das presenças e faltas contabilizadas na semana pela função compartilhada evaluateAllStudentsAttendance e evaluateDayScheduleEvasao.',
+      'Soma das presenças e faltas contabilizadas na semana pela função compartilhada evaluateAllStudentsAttendance e evaluateDayScheduleEvasao por formação do aluno.',
     regraNegocioFormula:
-      'Frequência (%) = [Total Presenças / (Total Presenças + Total Faltas)] × 100. Evasão: aluno com 2+ horários no mesmo dia que teve pelo menos 1 presença e 1 falta.',
+      'Frequência (%) = [Total Presenças / (Total Presenças + Total Faltas)] × 100. Evasão: calculada por formação do aluno (aluno com 2+ horários na mesma formação no mesmo dia que teve pelo menos 1 presença e 1 falta). Alunos com múltiplas formações são apurados por cada formação.',
     periodoConsiderado:
       'Dias e turnos já contabilizados na semana vigente.',
     filtrosQueInfluenciam:

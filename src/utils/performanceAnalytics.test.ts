@@ -534,6 +534,249 @@ describe('Reestruturação Visual, Otimização, Segurança e Correções de Ló
     );
   });
 
+  it('Validação de Regra de Negócio: O cálculo de evasão é por formação do aluno, não por contrato', () => {
+    // Caso 1: Aluno com 1 contrato e 2 formações distintas (Informática às 08h e Inglês às 09h).
+    // Presença em Informática e Falta em Inglês.
+    // Como cada formação tem apenas 1 agendamento, NENHUMA formação cometeu evasão!
+    const multiFormacaoRecords = [
+      makeStudentRecord({
+        id: 401,
+        contrato: 'CTR-MULTI-01',
+        nomeCompleto: 'Carlos Eduardo Oliveira',
+        formacao: 'INFORMÁTICA - DINÂMICA',
+        curso: 'INFORMÁTICA ESSENCIAL',
+        diaSemana: 'Sábado',
+        horaInicio: '08:00',
+        horaFim: '09:00',
+        status: 'FINALIZADO',
+        presencaOuFalta: 'P',
+        inicio: '31/10/2026 08:02',
+      }),
+      makeStudentRecord({
+        id: 402,
+        contrato: 'CTR-MULTI-01',
+        nomeCompleto: 'Carlos Eduardo Oliveira',
+        formacao: 'INGLÊS EVOLUTION',
+        curso: 'BOOK 1',
+        diaSemana: 'Sábado',
+        horaInicio: '09:00',
+        horaFim: '10:00',
+        status: 'NÃO INICIADO',
+        presencaOuFalta: 'F',
+        inicio: '',
+      }),
+    ];
+
+    const evaluatedCaso1 = evaluateAllStudentsAttendance(
+      multiFormacaoRecords,
+      11 * 60,
+      {},
+      [],
+      'Sábado'
+    );
+    assert.equal(
+      evaluatedCaso1[0].isEvasao,
+      false,
+      'Informática com 1 único agendamento e presença não deve ser considerada evasão'
+    );
+    assert.equal(
+      evaluatedCaso1[1].isEvasao,
+      false,
+      'Inglês com 1 único agendamento e ausência não deve ser considerada evasão'
+    );
+    const kpisCaso1 = computePerformanceKPIs(evaluatedCaso1, 11 * 60, {}, [], 'Sábado');
+    assert.equal(
+      kpisCaso1.evasaoCount,
+      0,
+      'Evasão por formação não deve gerar falso positivo quando o aluno tem 1 aula de cada formação'
+    );
+
+    // Caso 2: Aluno com mais de 1 formação, sendo que Informática tem 2 agendamentos (08h e 09h)
+    // e Inglês tem 1 agendamento (10h).
+    // O aluno comparece à 1ª aula de Informática (08h) e falta à 2ª aula de Informática (09h).
+    // O aluno comparece à aula de Inglês (10h).
+    // A evasão deve ser apontada EXCLUSIVAMENTE na formação Informática!
+    const caso2Records = [
+      makeStudentRecord({
+        id: 403,
+        contrato: 'CTR-MULTI-02',
+        nomeCompleto: 'Mariana Lima Barbosa',
+        formacao: 'INFORMÁTICA - DINÂMICA',
+        curso: 'INFORMÁTICA ESSENCIAL',
+        diaSemana: 'Sábado',
+        horaInicio: '08:00',
+        horaFim: '09:00',
+        status: 'FINALIZADO',
+        presencaOuFalta: 'P',
+        inicio: '31/10/2026 08:02',
+      }),
+      makeStudentRecord({
+        id: 404,
+        contrato: 'CTR-MULTI-02',
+        nomeCompleto: 'Mariana Lima Barbosa',
+        formacao: 'INFORMÁTICA - DINÂMICA',
+        curso: 'INFORMÁTICA ESSENCIAL',
+        diaSemana: 'Sábado',
+        horaInicio: '09:00',
+        horaFim: '10:00',
+        status: 'NÃO INICIADO',
+        presencaOuFalta: 'F',
+        inicio: '',
+      }),
+      makeStudentRecord({
+        id: 405,
+        contrato: 'CTR-MULTI-02',
+        nomeCompleto: 'Mariana Lima Barbosa',
+        formacao: 'INGLÊS EVOLUTION',
+        curso: 'BOOK 1',
+        diaSemana: 'Sábado',
+        horaInicio: '10:00',
+        horaFim: '11:00',
+        status: 'FINALIZADO',
+        presencaOuFalta: 'P',
+        inicio: '31/10/2026 10:01',
+      }),
+    ];
+
+    const evaluatedCaso2 = evaluateAllStudentsAttendance(
+      caso2Records,
+      12 * 60,
+      {},
+      [],
+      'Sábado'
+    );
+    assert.equal(
+      evaluatedCaso2[0].isEvasao,
+      true,
+      'Aula 1 da formação Informática deve ser marcada como isEvasao = true'
+    );
+    assert.equal(
+      evaluatedCaso2[1].isEvasao,
+      true,
+      'Aula 2 da formação Informática deve ser marcada como isEvasao = true'
+    );
+    assert.equal(
+      evaluatedCaso2[2].isEvasao,
+      false,
+      'Formação Inglês com presença integral NÃO cometeu evasão'
+    );
+    const kpisCaso2 = computePerformanceKPIs(evaluatedCaso2, 12 * 60, {}, [], 'Sábado');
+    assert.equal(
+      kpisCaso2.evasaoCount,
+      1,
+      'Evasão deve contabilizar exatamente 1 formação em evasão'
+    );
+
+    // Caso 3: Aluno com 2 formações, e AMBAS cometeram evasão no mesmo dia
+    // (2 aulas em Informática: 1 P e 1 F; e 2 aulas em Inglês: 1 P e 1 F)
+    // O evasaoCount deve ser 2 (contabilizando por cada formação do aluno, não 1 pelo contrato).
+    const caso3Records = [
+      makeStudentRecord({
+        id: 406,
+        contrato: 'CTR-MULTI-03',
+        nomeCompleto: 'Gabriel Souza Ramos',
+        formacao: 'INFORMÁTICA - DINÂMICA',
+        diaSemana: 'Sábado',
+        horaInicio: '08:00',
+        status: 'FINALIZADO',
+        presencaOuFalta: 'P',
+        inicio: '31/10/2026 08:02',
+      }),
+      makeStudentRecord({
+        id: 407,
+        contrato: 'CTR-MULTI-03',
+        nomeCompleto: 'Gabriel Souza Ramos',
+        formacao: 'INFORMÁTICA - DINÂMICA',
+        diaSemana: 'Sábado',
+        horaInicio: '09:00',
+        status: 'NÃO INICIADO',
+        presencaOuFalta: 'F',
+      }),
+      makeStudentRecord({
+        id: 408,
+        contrato: 'CTR-MULTI-03',
+        nomeCompleto: 'Gabriel Souza Ramos',
+        formacao: 'INGLÊS EVOLUTION',
+        diaSemana: 'Sábado',
+        horaInicio: '10:00',
+        status: 'FINALIZADO',
+        presencaOuFalta: 'P',
+        inicio: '31/10/2026 10:03',
+      }),
+      makeStudentRecord({
+        id: 409,
+        contrato: 'CTR-MULTI-03',
+        nomeCompleto: 'Gabriel Souza Ramos',
+        formacao: 'INGLÊS EVOLUTION',
+        diaSemana: 'Sábado',
+        horaInicio: '11:00',
+        status: 'NÃO INICIADO',
+        presencaOuFalta: 'F',
+      }),
+    ];
+
+    const evaluatedCaso3 = evaluateAllStudentsAttendance(
+      caso3Records,
+      12 * 60,
+      {},
+      [],
+      'Sábado'
+    );
+    assert.equal(evaluatedCaso3[0].isEvasao, true, 'Informática teve evasão');
+    assert.equal(evaluatedCaso3[1].isEvasao, true, 'Informática teve evasão');
+    assert.equal(evaluatedCaso3[2].isEvasao, true, 'Inglês teve evasão');
+    assert.equal(evaluatedCaso3[3].isEvasao, true, 'Inglês teve evasão');
+
+    const kpisCaso3 = computePerformanceKPIs(evaluatedCaso3, 12 * 60, {}, [], 'Sábado');
+    assert.equal(
+      kpisCaso3.evasaoCount,
+      2,
+      'Se o aluno tiver mais que 1 formação em evasão, o cálculo deve contabilizar cada formação (2)'
+    );
+
+    // Caso 4: Aluno com contratos diferentes (ex.: CTR-A e CTR-B) na MESMA formação
+    // Deve reconhecer que ambos os horários pertencem à mesma formação do mesmo aluno!
+    const caso4Records = [
+      makeStudentRecord({
+        id: 410,
+        contrato: 'CTR-CONTRATO-A',
+        nomeCompleto: 'Beatriz Martins',
+        formacao: 'GESTÃO EMPRESARIAL',
+        diaSemana: 'Sábado',
+        horaInicio: '08:00',
+        status: 'FINALIZADO',
+        presencaOuFalta: 'P',
+        inicio: '31/10/2026 08:05',
+      }),
+      makeStudentRecord({
+        id: 411,
+        contrato: 'CTR-CONTRATO-B',
+        nomeCompleto: 'Beatriz Martins',
+        formacao: 'GESTÃO EMPRESARIAL',
+        diaSemana: 'Sábado',
+        horaInicio: '09:00',
+        status: 'NÃO INICIADO',
+        presencaOuFalta: 'F',
+      }),
+    ];
+
+    const evaluatedCaso4 = evaluateAllStudentsAttendance(
+      caso4Records,
+      10 * 60,
+      {},
+      [],
+      'Sábado'
+    );
+    assert.equal(
+      evaluatedCaso4[0].isEvasao,
+      true,
+      'Evasão por formação deve identificar evasão mesmo com contratos diferentes para a mesma formação do aluno'
+    );
+    assert.equal(evaluatedCaso4[1].isEvasao, true);
+    const kpisCaso4 = computePerformanceKPIs(evaluatedCaso4, 10 * 60, {}, [], 'Sábado');
+    assert.equal(kpisCaso4.evasaoCount, 1);
+  });
+
   it('Seção 5.3: Presença e Faltas (especial atenção aos alunos de Inglês) — Contagem unificada em todas as telas', () => {
     const englishRecords = DB_STUDENT_RECORDS.filter(
       (r) => resolveStudentCategory(r) === 'INGLÊS'

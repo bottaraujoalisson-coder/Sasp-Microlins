@@ -1884,12 +1884,29 @@ export function evaluateStudentAttendance(
 }
 
 /**
- * Regra centralizada e única de Evasão:
- * - Aplica-se quando o aluno possui 2 ou mais agendamentos no mesmo dia (totalAgendamentosDia >= 2).
- * - Critério de Atribuição: O aluno compareceu a pelo menos 1 aula no dia (attendanceStatus === 'Presença')
- *   E faltou a pelo menos 1 aula agendada no mesmo dia cujo horário/tolerância já expirou (attendanceStatus === 'Falta').
+ * Chave única de identificação por Formação do Aluno:
+ * - Regra Obrigatória: O cálculo de evasão é por formação do aluno, não por contrato.
+ * - Se o aluno tiver mais que 1 formação, o cálculo de evasão deve ser por cada formação,
+ *   e não por cada contrato do aluno.
+ */
+export function buildStudentFormationKey(
+  record: Pick<StudentPerformanceRecord, 'contrato' | 'formacao' | 'nomeCompleto'>
+): string {
+  const normName = normalizeStudentName(record.nomeCompleto || '');
+  const cleanContrato = (record.contrato || '').trim();
+  const studentIdentity = normName || cleanContrato || 'sem-aluno';
+  const formacaoKey = normalizeFormacaoKey(record.formacao);
+  return `${studentIdentity}::${formacaoKey}`;
+}
+
+/**
+ * Regra centralizada e única de Evasão por Formação do Aluno:
+ * - O cálculo de evasão é por formação do aluno, não por contrato.
+ * - Aplica-se quando a formação do aluno possui 2 ou mais agendamentos no mesmo dia (totalAgendamentosDia >= 2).
+ * - Critério de Atribuição: O aluno compareceu a pelo menos 1 aula na formação no dia (attendanceStatus === 'Presença')
+ *   E faltou a pelo menos 1 aula agendada na mesma formação no mesmo dia cujo horário/tolerância já expirou (attendanceStatus === 'Falta').
  * - Critério de Remoção: Se a falta for justificada/substituída por Presença (via sistema ou override),
- *   ou se todas as aulas forem Presença (100% frequência), ou se o aluno faltar a todas as aulas do dia (ausência integral),
+ *   ou se todas as aulas forem Presença (100% frequência), ou se o aluno faltar a todas as aulas da formação no dia (ausência integral),
  *   o status de evasão é imediatamente removido (isEvasao = false, summary = null).
  */
 export function evaluateDayScheduleEvasao(dayRecords: EvaluatedStudentRecord[]): {
@@ -2022,8 +2039,9 @@ export function evaluateAllStudentsAttendance(
     );
   }
 
-  // Agrupar por (diaSemana, contrato) para avaliar Evasão e Frequência do contrato no dia
-  const dayContractGroups = new Map<string, EvaluatedStudentRecord[]>();
+  // Agrupar por (diaSemana, aluno, formação) para avaliar Evasão e Frequência por Formação do Aluno no dia
+  // (Regra Obrigatória: O cálculo de evasão é por formação do aluno, não por contrato)
+  const dayFormationGroups = new Map<string, EvaluatedStudentRecord[]>();
   // Agrupar por contrato na semana para contabilizar recorrência de saída antecipada (Item 1.3)
   const earlyExitCountByContract = new Map<string, number>();
   // Mapear irmãos do mesmo responsável na unidade (Seção 4)
@@ -2033,10 +2051,11 @@ export function evaluateAllStudentsAttendance(
   >();
 
   for (const rec of uniqueSchedules) {
-    const key = `${rec.diaSemana}::${rec.contrato}`;
-    const list = dayContractGroups.get(key) ?? [];
+    const studentFormationKey = buildStudentFormationKey(rec);
+    const key = `${rec.diaSemana}::${studentFormationKey}`;
+    const list = dayFormationGroups.get(key) ?? [];
     list.push(rec);
-    dayContractGroups.set(key, list);
+    dayFormationGroups.set(key, list);
 
     if (rec.isSaidaAntecipada) {
       earlyExitCountByContract.set(
@@ -2074,7 +2093,7 @@ export function evaluateAllStudentsAttendance(
     }
   }
 
-  for (const group of dayContractGroups.values()) {
+  for (const group of dayFormationGroups.values()) {
     const result = evaluateDayScheduleEvasao(group);
     let pCount = 0;
     let fCount = 0;
@@ -2760,13 +2779,14 @@ export function computePerformanceKPIs(
   const total = totalAgendamentos;
 
   const uniqueContracts = new Set<string>();
-  const evasaoContracts = new Set<string>();
+  const evasaoFormacoes = new Set<string>();
   const activeNpsContracts = new Set<string>();
 
   for (const r of evaluated) {
     uniqueContracts.add(r.contrato);
     if (r.isEvasao) {
-      evasaoContracts.add(r.contrato);
+      // Regra Obrigatória: O cálculo de evasão é por formação do aluno, não por contrato
+      evasaoFormacoes.add(buildStudentFormationKey(r));
     }
     if (r.hasActiveNps) {
       activeNpsContracts.add(r.contrato);
@@ -2774,7 +2794,7 @@ export function computePerformanceKPIs(
   }
 
   const totalAlunosUnicos = uniqueContracts.size;
-  const evasaoCount = evasaoContracts.size;
+  const evasaoCount = evasaoFormacoes.size;
   const npsAtivosCount = activeNpsContracts.size;
 
   const iniciados = evaluated.filter((r) => r.status === 'INICIADO').length;
@@ -3101,8 +3121,10 @@ export function groupByHourKanban(
       : 0;
 
     const uniqueColContracts = new Set(list.map((r) => r.contrato));
-    const evasaoColContracts = new Set(
-      list.filter((r) => r.isEvasao).map((r) => r.contrato)
+    const evasaoColFormacoes = new Set(
+      list
+        .filter((r) => r.isEvasao)
+        .map((r) => buildStudentFormationKey(r))
     );
     const npsAtivosCount = list.filter((r) => r.hasActiveNps).length;
 
@@ -3120,7 +3142,7 @@ export function groupByHourKanban(
       total: list.length,
       totalAgendamentos: list.length,
       totalAlunosUnicos: uniqueColContracts.size,
-      evasaoCount: evasaoColContracts.size,
+      evasaoCount: evasaoColFormacoes.size,
       npsAtivosCount,
       presencaCount,
       faltaCount,

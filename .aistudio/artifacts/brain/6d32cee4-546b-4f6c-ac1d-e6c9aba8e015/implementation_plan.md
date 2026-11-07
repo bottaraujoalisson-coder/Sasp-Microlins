@@ -33,3 +33,19 @@
 | **6. Portal NPS (Indecx)** | Cruzamento Hierárquico e Status de Envio | **APROVADO** | Cruzamento em 4 níveis (ID, Matrícula, E-mail, Nome). Total de convites sincronizado. |
 | **7. Testes de Carga e Estresse** | 10, 50, 100 e 200 req/s simultâneas | **APROVADO** | 0 falhas em todas as baterias de teste de concorrência e teste de vazão. |
 | **8. Compilação e Tipagem** | `compile_applet` e `lint_applet` | **APROVADO** | 0 erros de sintaxe, 0 erros de tipagem TypeScript (`tsc --noEmit` limpo). |
+| **9. Evasão por Formação do Aluno** | Evasão apurada por formação e não por contrato | **APROVADO** | Aluno com múltiplas formações apurado e contabilizado individualmente por cada formação. |
+
+## 3. Homologação da Regra de Evasão por Formação do Aluno
+1. **Regra de Negócio Implementada**:
+   - O cálculo de evasão é realizado **por formação do aluno, e não por contrato**.
+   - Se o aluno estiver matriculado em mais de uma formação (ex: *Informática* e *Inglês*), a apuração de evasão é completamente desacoplada: cada formação possui seu próprio cômputo e seus próprios agendamentos no dia.
+   - Um aluno que comparece a 1 aula de Informática e falta a 1 aula de Inglês (tendo apenas 1 agendamento em cada) **não comete evasão**, pois em nenhuma das duas formações houve comparecimento parcial seguido de ausência.
+   - Se o aluno possuir 2 agendamentos em Informática (1 Presença e 1 Falta) e 1 agendamento em Inglês (Presença), a evasão é apontada **exclusivamente na formação Informática**, mantendo a formação Inglês como regular.
+   - Se o aluno possuir 2 formações e ambas apresentarem evasão no dia, o indicador `evasaoCount` contabiliza **2 evasões** (uma por cada formação), e não apenas 1 pelo contrato.
+   - Caso o aluno possua contratos distintos para a mesma formação, os horários são unificados sob a mesma formação do aluno, preservando a detecção fidedigna.
+2. **Evidência de Testes Automatizados**:
+   - Caso 1 (1 aula por formação, 1 P e 1 F): 0 evasões (APROVADO).
+   - Caso 2 (2 aulas em Informática com 1 P e 1 F, e 1 aula em Inglês com 1 P): 1 evasão em Informática (APROVADO).
+   - Caso 3 (Ambas formações com evasão no mesmo dia): 2 evasões contabilizadas no KPI (APROVADO).
+   - Caso 4 (Contratos diferentes para a mesma formação): identificação unificada e 1 evasão contabilizada (APROVADO).
+
