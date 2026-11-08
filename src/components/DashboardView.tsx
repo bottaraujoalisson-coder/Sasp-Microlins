@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowDown,
@@ -68,12 +68,15 @@ import {
 } from '../utils/performanceAnalytics';
 
 import { IndicatorHelpPopover } from './IndicatorHelpPopover';
+import { SmartAvatar, useToast } from './uiSystem';
 
 interface DashboardViewProps {
   allEvaluatedRecords: EvaluatedStudentRecord[];
   onSelectStudentRecord: (recordId: number) => void;
   activeNpsInvitations?: ActiveNpsInvitation[];
   onMaterialCauseUpdated?: (contrato: string, causa: string) => void;
+  externalSearchQuery?: string;
+  onExternalSearchChange?: (query: string) => void;
 }
 
 const DASHBOARD_WEEKDAYS = [
@@ -147,10 +150,21 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(
     onSelectStudentRecord,
     activeNpsInvitations = [],
     onMaterialCauseUpdated,
+    externalSearchQuery = '',
+    onExternalSearchChange,
   }) => {
-    const [filters, setFilters] = useState<DashboardFilterCriteria>(
-      DEFAULT_DASHBOARD_FILTERS
-    );
+    const [filters, setFilters] = useState<DashboardFilterCriteria>(() => ({
+      ...DEFAULT_DASHBOARD_FILTERS,
+      search: externalSearchQuery,
+    }));
+
+    useEffect(() => {
+      setFilters((prev) =>
+        prev.search === externalSearchQuery
+          ? prev
+          : { ...prev, search: externalSearchQuery }
+      );
+    }, [externalSearchQuery]);
 
     // =========================================================================
     // 1. SELEÇÃO MÚLTIPLA DE CARDS DO DASHBOARD (MULTI-CARD SELECTION)
@@ -530,7 +544,17 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(
       setLastExportNotification(
         `Exportado: ${filename} (${targetStudents.length} registros)`
       );
+      emitExportToast(filename, targetStudents.length, format);
       window.setTimeout(() => setLastExportNotification(null), 4000);
+    };
+
+    const { toast } = useToast();
+    const emitExportToast = (filename: string, count: number, format: 'XLSX' | 'PDF') => {
+      toast({
+        type: 'success',
+        title: `Exportação ${format} Concluída`,
+        message: `${filename} (${count} registros)`,
+      });
     };
 
     const isApostilaCardActive =
@@ -560,13 +584,6 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(
       isCardSelected('CATEGORIA_INGLES') ||
       isCardSelected('CATEGORIA_PROFISSIONALIZANTE');
 
-    // =========================================================================
-    // RENDERIZAÇÃO 100% PADRONIZADA DAS CÉLULAS DA TABELA CONSOLIDADA
-    // Padronização Tipográfica Estrita:
-    // - Mesma fonte em toda a tabela: font-sans (Plus Jakarta Sans)
-    // - Mesmo tamanho e altura de linha: text-xs leading-4 (12px)
-    // - Mesmo peso visual: font-normal text-slate-700 dark:text-slate-200
-    // =========================================================================
     const renderCellContent = (
       st: ConsolidatedDashboardStudent,
       col: ResolvedTableColumn
@@ -578,9 +595,23 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(
       switch (col.id) {
         case 'nomeCompleto':
           return (
-            <span className="font-sans text-xs leading-4 font-normal text-slate-800 dark:text-slate-100">
-              {st.nomeCompleto}
-            </span>
+            <div className="inline-flex items-center gap-2">
+              <SmartAvatar
+                name={st.nomeCompleto}
+                contrato={st.contratos[0]}
+                size="sm"
+                statusDot={
+                  st.isEvasao
+                    ? 'error'
+                    : st.inadimplente
+                    ? 'warning'
+                    : 'success'
+                }
+              />
+              <span className="font-sans text-xs leading-4 font-semibold text-[var(--text-primary)]">
+                {st.nomeCompleto}
+              </span>
+            </div>
           );
 
         case 'contrato':
@@ -1477,14 +1508,6 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(
                 </div>
               </div>
 
-              <input
-                type="text"
-                placeholder="Buscar valores..."
-                value={multiFilterSearch}
-                onChange={(e) => setMultiFilterSearch(e.target.value)}
-                className="mb-2 h-6 w-full rounded border border-slate-300 bg-slate-50 px-2 font-sans text-xs font-normal text-slate-800 focus:border-[#004A8D] focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-              />
-
               <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
                 {distinctValues.map((opt) => {
                   const checked = selectedMulti.includes(opt.value);
@@ -2060,33 +2083,29 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(
                 </span>
               </div>
 
-              {/* Barra de Pesquisa (Nome ou Contrato) */}
-              <div className="relative min-w-[210px] sm:min-w-[240px]">
-                <Search className="pointer-events-none absolute top-2 left-2.5 h-3.5 w-3.5 text-slate-400" />
-                <input
-                  type="search"
-                  aria-label="Pesquisar aluno por nome ou número do contrato"
-                  data-testid="consolidated-table-search"
-                  placeholder="Pesquisar nome ou nº do contrato..."
-                  value={filters.search || ''}
-                  onChange={(e) =>
-                    setFilters((prev) => ({ ...prev, search: e.target.value }))
-                  }
-                  className="h-7 w-full rounded-lg border border-slate-300 bg-white pr-7 pl-8 font-sans text-xs font-normal text-slate-800 placeholder:text-slate-400 focus:border-[#004A8D] focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                />
-                {filters.search && (
+              {/* Indicador de Pesquisa Global do Cabeçalho */}
+              {filters.search && (
+                <div
+                  data-testid="consolidated-table-active-search-badge"
+                  className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 text-xs font-semibold text-[#004A8D] dark:border-sky-800 dark:bg-sky-950/60 dark:text-sky-300"
+                >
+                  <Search className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate max-w-[180px]">
+                    Busca: &ldquo;{filters.search}&rdquo;
+                  </span>
                   <button
                     type="button"
                     aria-label="Limpar pesquisa"
-                    onClick={() =>
-                      setFilters((prev) => ({ ...prev, search: '' }))
-                    }
-                    className="absolute top-1.5 right-2 rounded p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    onClick={() => {
+                      setFilters((prev) => ({ ...prev, search: '' }));
+                      onExternalSearchChange?.('');
+                    }}
+                    className="rounded p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Controles de Expandir / Recolher Todos quando houver dados agrupados na tabela */}
               {groupingEnabled && activeGroupByFields.length > 0 && (

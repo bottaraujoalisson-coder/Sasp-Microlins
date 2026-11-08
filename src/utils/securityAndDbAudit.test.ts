@@ -174,6 +174,17 @@ test('Auditoria de Segurança, Supabase Sole Database, Supabase Auth e Remoção
     const afterDelete = authenticateUserInDb('coord.teste', 'CoordPassword@2026', '127.0.0.1', 'NodeTest');
     assert.equal(afterDelete.ok, false);
     assert.equal(afterDelete.status, 401);
+
+    // Validação estrita do Administrador Geral único (admin / 2ab@283)
+    const adminOk = authenticateUserInDb('admin', '2ab@283', '127.0.0.1', 'NodeTest');
+    assert.equal(adminOk.ok, true);
+    assert.equal(adminOk.session?.role, 'ADMIN');
+
+    // Senhas antigas ou aliases não devem ser aceitos para ADM
+    const oldAdminPass = authenticateUserInDb('admin', 'Alisson@2026', '127.0.0.1', 'NodeTest');
+    assert.equal(oldAdminPass.ok, false);
+    const aliasAdmin = authenticateUserInDb('alisson', '2ab@283', '127.0.0.1', 'NodeTest');
+    assert.equal(aliasAdmin.ok, false);
   });
 
   await t.test('5. Proteção contra Força Bruta (Rate Limiting) e Recuperação Segura de Senha', () => {

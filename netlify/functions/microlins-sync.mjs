@@ -1,14 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL =
+const rawSupabaseUrl = (
   process.env.VITE_SUPABASE_URL ||
   process.env.SUPABASE_URL ||
-  'https://dwarcjrpwubtveilwkyi.supabase.co';
+  'https://dwarcjrpwubtveilwkyi.supabase.co'
+).trim();
+const SUPABASE_URL = /hkonvuytinqlakerpara/i.test(rawSupabaseUrl)
+  ? 'https://dwarcjrpwubtveilwkyi.supabase.co'
+  : rawSupabaseUrl.replace(/\.supabase\.com(\/|$)/i, '.supabase.co$1');
 const SUPABASE_KEY =
-  process.env.SUPABASE_SECRET_KEY ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.VITE_SUPABASE_ANON_KEY ||
+  (/hkonvuytinqlakerpara/i.test(rawSupabaseUrl)
+    ? ''
+    : process.env.SUPABASE_SECRET_KEY ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+      process.env.VITE_SUPABASE_ANON_KEY) ||
   'sb_publishable_qs0jbtlopLTJG1cbZD8AFQ_kRR37HKM';
 
 const PORTAL_LOGIN = process.env.PORTAL_MICROLINS_LOGIN || 'a116882';

@@ -75,8 +75,8 @@ export const PORTAL_WEEKDAY_LABEL_TO_CODE: Record<string, string> = {
 
 export const PORTAL_METADATA = {
   unidade: "ESCOLA PRESIDENTE PRUDENTE",
-  usuarioLogin: "",
-  usuarioNomeCompleto: "Coordenação Pedagógica",
+  usuarioLogin: "a116882",
+  usuarioNomeCompleto: "João Pedro Pereira França",
   usuarioCargo: "Auxiliar Pedagógico",
   portalUrl: "https://portaldoaluno.microlins.com.br/login/",
   dataReferencia: "06/11/2026",

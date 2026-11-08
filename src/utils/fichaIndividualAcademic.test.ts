@@ -9,6 +9,8 @@ import {
   normalizeFichaSearchText,
   normalizePortalGradeScale,
   searchStudentsForFichaIndividual,
+  buildFichaAcompanhamentoForModule,
+  getOfficialModuleSyllabus,
 } from './fichaIndividualAcademic';
 
 describe('Ficha Individual do Aluno — Busca e Consolidação Acadêmica Unificada', () => {
@@ -89,5 +91,40 @@ describe('Ficha Individual do Aluno — Busca e Consolidação Acadêmica Unific
       assert.ok(mod.frequenciaFinal !== null && mod.frequenciaFinal >= 0 && mod.frequenciaFinal <= 100);
       assert.ok(mod.aulasConcluidas >= 1);
     }
+  });
+
+  it('deve gerar a Ficha de Acompanhamento com as 16 aulas preenchidas com dados reais e ementa temática', () => {
+    const sample = directory[0];
+
+    const syllabusExcel = getOfficialModuleSyllabus('Excel 2021 Avançado Módulo I');
+    assert.equal(syllabusExcel.length, 16);
+    assert.ok(syllabusExcel[0].includes('Aula 01'));
+    assert.ok(syllabusExcel[15].includes('Aula 16'));
+
+    const acompanhamento = buildFichaAcompanhamentoForModule(sample);
+    assert.ok(acompanhamento.moduloNome);
+    assert.ok(acompanhamento.instituicaoNome.includes('Microlins'));
+    assert.equal(acompanhamento.alunoNomeCompleto, sample.nomeCompleto);
+    assert.ok(acompanhamento.cursoTurma.length > 3);
+    assert.ok(acompanhamento.professorResponsavel.length > 2);
+    assert.ok(acompanhamento.periodoLetivo.length > 3);
+    assert.equal(acompanhamento.totalAulasPrevistas, 16);
+    assert.equal(acompanhamento.aulas.length, 16);
+    assert.ok(acompanhamento.educadorNome);
+    assert.ok(acompanhamento.horarioTurma !== '');
+    assert.ok(acompanhamento.frequenciaPercent >= 0 && acompanhamento.frequenciaPercent <= 100);
+    assert.equal(typeof acompanhamento.situacaoFinalAprovado, 'boolean');
+    assert.equal(typeof acompanhamento.situacaoFinalReprovado, 'boolean');
+
+    // Validação das 16 aulas estruturadas com as 5 colunas oficiais (Conteúdo, Data de início, Data de término, Nota, Assinatura)
+    acompanhamento.aulas.forEach((aula: any, i: number) => {
+      assert.equal(aula.aulaNumero, i + 1);
+      assert.ok(aula.nomeAula && aula.nomeAula.length > 5, 'Cada aula deve conter o nome/tópico real pré-carregado');
+      assert.equal(typeof aula.dataInicio, 'string');
+      assert.equal(typeof aula.dataTermino, 'string');
+      assert.equal(typeof aula.assinaturaVisto, 'string');
+      assert.ok(['NOR', 'REP', 'PLA', 'AVU'].includes(aula.tipoAula));
+      assert.ok(['P', 'F', 'FJ', 'RC', 'PENDENTE'].includes(aula.frequenciaStatus));
+    });
   });
 });

@@ -1,6 +1,6 @@
 -- ==============================================================================
 -- SCRIPT DE ATIVAÇÃO DE ROW LEVEL SECURITY (RLS) E POLÍTICAS DE ACESSO
--- Projeto: Microlins Presidente Prudente (hkonvuytinqlakerpara.supabase.co)
+-- Projeto: Microlins Presidente Prudente (dwarcjrpwubtveilwkyi.supabase.co)
 -- ==============================================================================
 -- Este script:
 -- 1. Ativa o Row Level Security (RLS) em todas as tabelas públicas do sistema.

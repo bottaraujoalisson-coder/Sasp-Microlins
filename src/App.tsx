@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
   BookOpen,
@@ -6,25 +7,36 @@ import {
   Calendar,
   CalendarCheck,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Clock,
   DollarSign,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Filter,
   Globe,
   GraduationCap,
+  IdCard,
   Kanban,
   KeyRound,
-  Layers,
   LayoutDashboard,
   Loader2,
   LogOut,
   Mail,
+  Menu,
   MessageSquare,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Percent,
   RotateCcw,
+  Search,
   ShieldCheck,
   Sparkles,
   Sun,
   UserCheck,
+  X,
   XCircle,
 } from 'lucide-react';
 import {
@@ -78,6 +90,7 @@ import {
   AuthSession,
   createDefaultSchoolsRegistry,
   DEFAULT_ADMIN_CREDENTIALS,
+  isGenericPlaceholderUserName,
   RegisteredSchool,
 } from './utils/authRegistry';
 import { StudentDetailModal } from './components/StudentDetailModal';
@@ -90,6 +103,18 @@ import { AdminPanelView } from './components/AdminPanelView';
 import { PortalAlunoHubView } from './components/PortalAlunoHubView';
 import { PrivacyProtectionView } from './components/PrivacyProtectionView';
 import { IndicatorHelpPopover } from './components/IndicatorHelpPopover';
+import {
+  ToastProvider,
+  CountUpNumber,
+  SmartAvatar,
+  KanbanBoardSkeleton,
+  SlideOverDrawer,
+  emitGlobalToast,
+  readInitialThemePreference,
+  saveThemePreference,
+} from './components/uiSystem';
+import { CommandPaletteModal } from './components/CommandPaletteModal';
+import { ExportStudioModal } from './components/ExportStudioModal';
 
 const AUTO_SYNC_INTERVAL_MS = 60_000;
 const FILTER_LOADING_DELAY_MS = 110;
@@ -137,7 +162,7 @@ function computeNpsSignature(list: ActiveNpsInvitation[]): string {
 }
 
 function getInitialTheme(): ThemeMode {
-  return 'light';
+  return readInitialThemePreference();
 }
 
 function formatCurrentBrasiliaSyncTimestamp(): string {
@@ -181,11 +206,12 @@ function getSimulatedWeekdayOverrideFromUrl(): string | undefined {
 function resolveDefaultWeekdayFilter(): string {
   const urlDay = getSimulatedWeekdayOverrideFromUrl();
   if (urlDay) return urlDay;
-  return getCurrentBrasiliaWeekdayLabel();
+  const currentDay = getCurrentBrasiliaWeekdayLabel();
+  return currentDay === 'Domingo' ? 'Sexta-feira' : currentDay;
 }
 
 export default function App() {
-  // Tema Visual Global (em memória de sessão)
+  // Tema Visual Global sincronizado com atributo data-theme e preferência do SO
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
 
   useEffect(() => {
@@ -199,7 +225,67 @@ export default function App() {
   }, [theme]);
 
   const toggleTheme = useCallback(() => {
-    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+    setTheme((prev) => {
+      const next = prev === 'light' ? 'dark' : 'light';
+      saveThemePreference(next);
+      emitGlobalToast({
+        variant: 'info',
+        title: next === 'dark' ? 'Tema Escuro ativado' : 'Tema Claro ativado',
+        description:
+          next === 'dark'
+            ? 'Interface ajustada para alto contraste noturno.'
+            : 'Interface ajustada para visualização clara institucional.',
+        durationMs: 2600,
+      });
+      return next;
+    });
+  }, []);
+
+  // Estados de navegação avançada (Sidebar colapsável, Busca Global no Cabeçalho, Command Palette Ctrl+K, Export Studio e Drawer de Filtros)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  const [isAcademicSubmenuOpen, setIsAcademicSubmenuOpen] = useState<boolean>(true);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const [isExportStudioOpen, setIsExportStudioOpen] = useState<boolean>(false);
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState<boolean>(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState<string>('');
+  const [isHeaderSearchDropdownOpen, setIsHeaderSearchDropdownOpen] =
+    useState<boolean>(false);
+  const headerSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const headerSearchContainerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          setIsCommandPaletteOpen((prev) => !prev);
+        } else if (headerSearchInputRef.current) {
+          headerSearchInputRef.current.focus();
+          headerSearchInputRef.current.select();
+          setIsHeaderSearchDropdownOpen(true);
+        } else {
+          setIsCommandPaletteOpen((prev) => !prev);
+        }
+      } else if (e.key === 'Escape') {
+        setIsMobileSidebarOpen(false);
+        setIsHeaderSearchDropdownOpen(false);
+      }
+    };
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        headerSearchContainerRef.current &&
+        !headerSearchContainerRef.current.contains(e.target as Node)
+      ) {
+        setIsHeaderSearchDropdownOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
   }, []);
 
   const [records, setRecords] = useState<StudentPerformanceRecord[]>(
@@ -536,7 +622,7 @@ export default function App() {
   >('KANBAN_ALUNOS');
   const [portalHubStudentId, setPortalHubStudentId] = useState<number | null>(null);
   const [portalHubInitialSubTab, setPortalHubInitialSubTab] = useState<
-    'CARTEIRINHA' | 'BOLETIM' | 'DECLARACAO'
+    'CARTEIRINHA' | 'BOLETIM' | 'ACOMPANHAMENTO' | 'DECLARACAO'
   >('BOLETIM');
 
   // === Filtros da aba KANBAN DE ALUNOS (sem barra de pesquisa, conforme Item 2) ===
@@ -669,6 +755,28 @@ export default function App() {
               return prev;
             }
             return { ...prev, ...payload.metadata };
+          });
+          setAuthSession((prevSession) => {
+            if (!prevSession || prevSession.role !== 'ESCOLA') {
+              return prevSession;
+            }
+            const incomingName = payload.metadata.usuarioNomeCompleto;
+            const nextNome = !isGenericPlaceholderUserName(incomingName)
+              ? incomingName
+              : prevSession.nomeCompleto;
+            const nextCargo =
+              payload.metadata.usuarioCargo || prevSession.cargo;
+            if (
+              prevSession.nomeCompleto === nextNome &&
+              prevSession.cargo === nextCargo
+            ) {
+              return prevSession;
+            }
+            return {
+              ...prevSession,
+              nomeCompleto: nextNome,
+              cargo: nextCargo,
+            };
           });
         }
         const nextMinutes = urlTimeOverride
@@ -823,13 +931,13 @@ export default function App() {
       .map((h) => `${String(h).padStart(2, '0')}h`);
   }, [dayFilteredRecords]);
 
-  // Registros avaliados do Kanban de Alunos com filtros de cabeçalho (sem campo de busca)
+  // Registros avaliados do Kanban de Alunos conectados à barra de pesquisa única do cabeçalho
   const headerFilteredRecords = useMemo(
     () =>
       filterAndSortRecords(
         allEvaluatedRecords,
         {
-          search: '',
+          search: globalSearchQuery,
           diaSemana: selectedDiaSemana,
           sala: selectedSala,
           professor: selectedEducador,
@@ -856,6 +964,7 @@ export default function App() {
       ),
     [
       allEvaluatedRecords,
+      globalSearchQuery,
       selectedDiaSemana,
       selectedSala,
       selectedEducador,
@@ -978,10 +1087,10 @@ export default function App() {
       .map((h) => `${String(h).padStart(2, '0')}h`);
   }, [npsDayFilteredCards]);
 
-  // Cards de alunos NPS filtrados (sem barra de pesquisa)
+  // Cards de alunos NPS filtrados (conectados à barra de pesquisa única do cabeçalho)
   const npsFilteredCards = useMemo(() => {
     const criteria: NpsFilterCriteria = {
-      search: '',
+      search: globalSearchQuery,
       origem: npsOrigem,
       pontoJornada: npsPontoJornada,
       horario: npsHorario,
@@ -992,6 +1101,7 @@ export default function App() {
     return filterSynchronizedNpsCards(synchronizedNpsStudentCards, criteria);
   }, [
     synchronizedNpsStudentCards,
+    globalSearchQuery,
     npsOrigem,
     npsPontoJornada,
     npsHorario,
@@ -1004,7 +1114,7 @@ export default function App() {
   const npsKPIs = useMemo(() => {
     const baseKPIs = computeNpsSummaryKPIs(npsFilteredCards);
     const byOrigemPool = filterSynchronizedNpsCards(synchronizedNpsStudentCards, {
-      search: '',
+      search: globalSearchQuery,
       origem: 'TODAS',
       pontoJornada: npsPontoJornada,
       horario: npsHorario,
@@ -1017,7 +1127,7 @@ export default function App() {
     const byDestinatarioPool = filterSynchronizedNpsCards(
       synchronizedNpsStudentCards,
       {
-        search: '',
+        search: globalSearchQuery,
         origem: npsOrigem,
         pontoJornada: npsPontoJornada,
         horario: npsHorario,
@@ -1031,7 +1141,7 @@ export default function App() {
     const byDeliveryPool = filterSynchronizedNpsCards(
       synchronizedNpsStudentCards,
       {
-        search: '',
+        search: globalSearchQuery,
         origem: npsOrigem,
         pontoJornada: npsPontoJornada,
         horario: npsHorario,
@@ -1056,6 +1166,7 @@ export default function App() {
   }, [
     npsFilteredCards,
     synchronizedNpsStudentCards,
+    globalSearchQuery,
     npsOrigem,
     npsPontoJornada,
     npsHorario,
@@ -1176,6 +1287,7 @@ export default function App() {
   };
 
   const hasActiveStudentFilters =
+    Boolean(globalSearchQuery.trim()) ||
     selectedDiaSemana !== resolveDefaultWeekdayFilter() ||
     selectedSala !== 'TODAS' ||
     selectedEducador !== 'TODOS' ||
@@ -1190,6 +1302,7 @@ export default function App() {
 
   const handleResetStudentFilters = () => {
     triggerWithLoading(() => {
+      setGlobalSearchQuery('');
       setSelectedDiaSemana(resolveDefaultWeekdayFilter());
       setSelectedSala('TODAS');
       setSelectedEducador('TODOS');
@@ -1205,6 +1318,7 @@ export default function App() {
   };
 
   const hasActiveNpsFilters =
+    Boolean(globalSearchQuery.trim()) ||
     npsDiaSemana !== resolveDefaultWeekdayFilter() ||
     npsOrigem !== 'TODAS' ||
     npsPontoJornada !== 'TODOS' ||
@@ -1214,6 +1328,7 @@ export default function App() {
 
   const handleResetNpsFilters = () => {
     triggerWithLoading(() => {
+      setGlobalSearchQuery('');
       setNpsDiaSemana(resolveDefaultWeekdayFilter());
       setNpsOrigem('TODAS');
       setNpsPontoJornada('TODOS');
@@ -1225,319 +1340,843 @@ export default function App() {
 
   const currentTimeStr = formatMinutesToHHMM(currentTimeMinutes);
 
+  // Resultados rápidos de alunos para o dropdown inteligente da barra de pesquisa única no cabeçalho
+  const headerQuickStudentMatches = useMemo(() => {
+    const q = globalSearchQuery.trim().toLowerCase();
+    if (!q) return [];
+    const byContract = new Map<string, typeof allEvaluatedRecords[number]>();
+    for (const r of allEvaluatedRecords) {
+      if (!byContract.has(r.contrato)) {
+        byContract.set(r.contrato, r);
+      }
+    }
+    return Array.from(byContract.values())
+      .filter(
+        (s) =>
+          s.nomeCompleto.toLowerCase().includes(q) ||
+          s.contrato.toLowerCase().includes(q) ||
+          s.curso.toLowerCase().includes(q) ||
+          (s.professor || '').toLowerCase().includes(q) ||
+          (s.sala || '').toLowerCase().includes(q)
+      )
+      .slice(0, 6);
+  }, [allEvaluatedRecords, globalSearchQuery]);
+
+  // Resolução dinâmica e fidedigna do nome completo e cargo do usuário autenticado
+  const resolvedUserFromRegistry = useMemo(() => {
+    const targetLogin = (
+      authSession?.login ||
+      portalMeta.usuarioLogin ||
+      ''
+    ).toLowerCase();
+    if (!targetLogin) return undefined;
+    for (const school of schoolsRegistry) {
+      const found = school.users.find(
+        (u) => u.login.toLowerCase() === targetLogin
+      );
+      if (found) return found;
+    }
+    return undefined;
+  }, [authSession?.login, portalMeta.usuarioLogin, schoolsRegistry]);
+
+  const activeSchoolName = authSession
+    ? authSession.role === 'ESCOLA'
+      ? authSession.schoolName || portalMeta.unidade
+      : 'PAINEL ADMINISTRADOR'
+    : 'Gestão Pedagógica e Acadêmica';
+
+  const activeUserFullName = !authSession
+    ? portalMeta.usuarioNomeCompleto
+    : authSession.role === 'ADMIN'
+    ? authSession.nomeCompleto || DEFAULT_ADMIN_CREDENTIALS.nomeCompleto
+    : !isGenericPlaceholderUserName(authSession.nomeCompleto)
+    ? authSession.nomeCompleto
+    : !isGenericPlaceholderUserName(portalMeta.usuarioNomeCompleto)
+    ? portalMeta.usuarioNomeCompleto
+    : !isGenericPlaceholderUserName(resolvedUserFromRegistry?.nomeCompleto)
+    ? resolvedUserFromRegistry!.nomeCompleto
+    : authSession.nomeCompleto || portalMeta.usuarioNomeCompleto;
+
+  const activeUserRole = !authSession
+    ? portalMeta.usuarioCargo
+    : authSession.role === 'ADMIN'
+    ? authSession.cargo || DEFAULT_ADMIN_CREDENTIALS.cargo
+    : authSession.cargo && authSession.cargo !== 'Coordenação Pedagógica'
+    ? authSession.cargo
+    : portalMeta.usuarioCargo ||
+      resolvedUserFromRegistry?.cargo ||
+      authSession.cargo ||
+      'Auxiliar Pedagógico';
+
+  const activeUserLogin = authSession?.login || portalMeta.usuarioLogin;
+
   // Se a página de Privacidade e Proteção de Dados (LGPD) estiver ativa, renderiza a página dedicada
   if (showPrivacyPage) {
     return (
-      <PrivacyProtectionView
-        onBack={() => setShowPrivacyPage(false)}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        activeSchoolName={
-          authSession
-            ? authSession.role === 'ESCOLA'
-              ? authSession.schoolName || portalMeta.unidade
-              : 'PAINEL ADMINISTRADOR'
-            : 'Gestão Pedagógica e Acadêmica'
-        }
-        activeUserName={authSession?.nomeCompleto}
-        activeUserRole={authSession?.cargo}
-      />
+      <ToastProvider>
+        <PrivacyProtectionView
+          onBack={() => setShowPrivacyPage(false)}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onLogout={authSession ? handleLogout : undefined}
+          activeSchoolName={activeSchoolName}
+          activeUserName={activeUserFullName}
+          activeUserRole={activeUserRole}
+          activeUserLogin={activeUserLogin}
+        />
+      </ToastProvider>
     );
   }
 
   // Se o usuário ainda não estiver autenticado no Painel de Login e Senha, exibe a tela de Login
   if (!authSession) {
     return (
-      <LoginView
-        schools={schoolsRegistry}
-        onLoginSuccess={handleLoginSuccess}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        onOpenPrivacyPage={() => setShowPrivacyPage(true)}
-      />
+      <ToastProvider>
+        <LoginView
+          schools={schoolsRegistry}
+          onLoginSuccess={handleLoginSuccess}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onOpenPrivacyPage={() => setShowPrivacyPage(true)}
+        />
+      </ToastProvider>
     );
   }
-
-  const activeSchoolName =
-    authSession.role === 'ESCOLA'
-      ? authSession.schoolName || portalMeta.unidade
-      : 'PAINEL ADMINISTRADOR';
-  const activeUserFullName =
-    authSession.nomeCompleto || portalMeta.usuarioNomeCompleto;
-  const activeUserRole = authSession.cargo || portalMeta.usuarioCargo;
-  const activeUserLogin = authSession.login || portalMeta.usuarioLogin;
 
   if (isLoadingData && records.length === 0) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-slate-900 text-white">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-sky-400" />
-          <p className="text-xs font-semibold tracking-wider uppercase text-slate-300">
-            Carregando dados da nuvem (Supabase)...
-          </p>
+      <ToastProvider>
+        <div className="flex h-screen w-screen flex-col gap-4 overflow-hidden bg-[var(--bg-primary)] p-6 text-[var(--text-primary)]">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Loader2 className="h-5 w-5 animate-spin text-[var(--color-primary)]" />
+              <span className="typo-subtitle font-bold">
+                Sincronizando dados acadêmicos da unidade...
+              </span>
+            </div>
+          </div>
+          <KanbanBoardSkeleton />
         </div>
-      </div>
+      </ToastProvider>
     );
   }
 
-  return (
-    <div
-      data-theme-mode={theme}
-      className="flex h-screen w-screen flex-col overflow-hidden bg-slate-100/80 text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-100"
-    >
-      {/* REGIÃO 1: CABEÇALHO COMPACTO E MINIMALISTA DE LINHA ÚNICA */}
-      <header
-        data-testid="main-header"
-        className="shrink-0 border-b border-[#00386B] bg-[#004A8D] text-white shadow-2xs dark:border-slate-800 dark:bg-[#003669]"
-      >
-        <div className="flex min-h-10 w-full flex-wrap items-center justify-between gap-2 px-3 py-1 sm:px-4 lg:flex-nowrap">
-          {/* Esquerda: Logo Oficial da Microlins + Nome da Escola */}
-          <div className="flex min-w-0 shrink-0 items-center gap-2">
-            <img
-              src="/assets/aistudio/logo-microlins_6400203f.png"
-              alt="Microlins"
-              className="h-5 w-auto object-contain brightness-0 invert"
-              data-testid="header-microlins-logo"
-            />
-            <div className="hidden h-4 w-px bg-white/20 sm:block" />
-            <div className="flex min-w-0 items-center gap-1.5">
-              <Building2 className="h-3.5 w-3.5 shrink-0 text-sky-200" />
-              <span
-                data-testid="header-school-name"
-                className="max-w-[200px] truncate text-xs font-bold tracking-tight text-white xl:max-w-[240px]"
-              >
-                {activeSchoolName}
-              </span>
-            </div>
-          </div>
+  const renderSidebarContent = (isCollapsedView: boolean) => (
+    <div className="flex h-full flex-col justify-between">
+      {/* Topo da Sidebar: Controle de Retração e Categorias com Transições Suaves */}
+      <div className="flex flex-col gap-3 overflow-y-auto px-2.5 py-3">
+        <div
+          className={`flex items-center ${
+            isCollapsedView ? 'justify-center' : 'justify-between px-1.5'
+          }`}
+        >
+          {!isCollapsedView && (
+            <span className="text-[10px] font-bold tracking-wider uppercase text-[var(--text-secondary)]">
+              Menu Principal
+            </span>
+          )}
+          <button
+            type="button"
+            data-testid="sidebar-collapse-toggle"
+            onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+            title={isCollapsedView ? 'Expandir menu lateral' : 'Recolher menu lateral'}
+            className="btn-press hidden h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] text-[var(--text-secondary)] transition-all duration-200 hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] lg:inline-flex"
+          >
+            {isCollapsedView ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+          </button>
+        </div>
 
-          {/* Centro: Navegação Principal entre Módulos */}
-          {authSession.role === 'ESCOLA' ? (
-            <nav
-              aria-label="Navegação entre Módulos"
-              className="order-3 flex w-full shrink-0 items-center justify-center gap-1 rounded-lg border border-white/10 bg-[#003669]/90 p-0.5 lg:order-2 lg:w-auto dark:bg-slate-900/70"
-            >
-              <button
+        {authSession.role === 'ESCOLA' && (
+          <>
+            {/* Categoria 1: Monitoramento & Operação */}
+            <div className="space-y-1">
+              {!isCollapsedView && (
+                <p className="px-2 text-[10px] font-bold tracking-wider uppercase text-[var(--text-secondary)]">
+                  Monitoramento & Operação
+                </p>
+              )}
+              <motion.button
+                whileHover={{ x: isCollapsedView ? 0 : 3 }}
+                whileTap={{ scale: 0.98 }}
+                transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
                 type="button"
                 data-testid="tab-kanban-alunos"
-                onClick={() =>
+                aria-current={activeTab === 'KANBAN_ALUNOS' ? 'page' : undefined}
+                onClick={() => {
                   triggerWithLoading(
                     () => setActiveTab('KANBAN_ALUNOS'),
                     'Carregando Kanban de Alunos...'
-                  )
+                  );
+                  setIsMobileSidebarOpen(false);
+                }}
+                title={
+                  isCollapsedView
+                    ? `Kanban de Alunos (${headerFilteredRecords.length})`
+                    : undefined
                 }
-                aria-current={activeTab === 'KANBAN_ALUNOS' ? 'page' : undefined}
-                className={`inline-flex h-6.5 items-center gap-1 rounded-md px-2.5 text-xs font-semibold whitespace-nowrap transition-all ${
+                className={`sidebar-nav-item group relative flex w-full items-center ${
+                  isCollapsedView ? 'justify-center px-0 py-2.5' : 'justify-between px-3 py-2'
+                } rounded-xl text-xs font-semibold transition-all duration-200 ${
                   activeTab === 'KANBAN_ALUNOS'
-                    ? 'bg-white text-[#004A8D] shadow-2xs'
-                    : 'text-sky-100 hover:bg-white/10 hover:text-white'
+                    ? 'bg-[var(--color-primary)] text-white shadow-sm'
+                    : 'text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]'
                 }`}
               >
-                <Kanban className="h-3 w-3 shrink-0" />
-                <span>Kanban de Alunos</span>
-                <span className="font-mono text-[10px] opacity-80 tabular-nums">
-                  ({headerFilteredRecords.length})
+                <span className="flex items-center gap-2.5 truncate">
+                  <Kanban className="h-4 w-4 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+                  {!isCollapsedView && <span className="truncate">Kanban de Alunos</span>}
                 </span>
-              </button>
+                {!isCollapsedView && (
+                  <span
+                    className={`rounded-md px-1.5 py-0.5 font-mono text-[10px] font-bold tabular-nums transition-colors ${
+                      activeTab === 'KANBAN_ALUNOS'
+                        ? 'bg-white/20 text-white'
+                        : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)]'
+                    }`}
+                  >
+                    {headerFilteredRecords.length}
+                  </span>
+                )}
+              </motion.button>
 
-              <button
+              <motion.button
+                whileHover={{ x: isCollapsedView ? 0 : 3 }}
+                whileTap={{ scale: 0.98 }}
+                transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
                 type="button"
                 data-testid="tab-kanban-nps"
-                onClick={() =>
+                aria-current={activeTab === 'KANBAN_NPS' ? 'page' : undefined}
+                onClick={() => {
                   triggerWithLoading(
                     () => setActiveTab('KANBAN_NPS'),
                     'Carregando Kanban NPS...'
-                  )
+                  );
+                  setIsMobileSidebarOpen(false);
+                }}
+                title={
+                  isCollapsedView
+                    ? `Kanban NPS (${npsFilteredCards.length})`
+                    : undefined
                 }
-                aria-current={activeTab === 'KANBAN_NPS' ? 'page' : undefined}
-                className={`inline-flex h-6.5 items-center gap-1 rounded-md px-2.5 text-xs font-semibold whitespace-nowrap transition-all ${
+                className={`sidebar-nav-item group relative flex w-full items-center ${
+                  isCollapsedView ? 'justify-center px-0 py-2.5' : 'justify-between px-3 py-2'
+                } rounded-xl text-xs font-semibold transition-all duration-200 ${
                   activeTab === 'KANBAN_NPS'
-                    ? 'bg-white text-[#004A8D] shadow-2xs'
-                    : 'text-sky-100 hover:bg-white/10 hover:text-white'
+                    ? 'bg-[var(--color-primary)] text-white shadow-sm'
+                    : 'text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]'
                 }`}
               >
-                <Sparkles className="h-3 w-3 shrink-0" />
-                <span>Kanban NPS</span>
-                <span className="font-mono text-[10px] opacity-80 tabular-nums">
-                  ({npsFilteredCards.length})
+                <span className="flex items-center gap-2.5 truncate">
+                  <Sparkles className="h-4 w-4 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+                  {!isCollapsedView && <span className="truncate">Kanban NPS</span>}
                 </span>
-              </button>
+                {!isCollapsedView && (
+                  <span
+                    className={`rounded-md px-1.5 py-0.5 font-mono text-[10px] font-bold tabular-nums transition-colors ${
+                      activeTab === 'KANBAN_NPS'
+                        ? 'bg-white/20 text-white'
+                        : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)]'
+                    }`}
+                  >
+                    {npsFilteredCards.length}
+                  </span>
+                )}
+              </motion.button>
 
-              <button
+              <motion.button
+                whileHover={{ x: isCollapsedView ? 0 : 3 }}
+                whileTap={{ scale: 0.98 }}
+                transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
                 type="button"
                 data-testid="tab-dashboard"
-                onClick={() =>
+                aria-current={activeTab === 'DASHBOARD' ? 'page' : undefined}
+                onClick={() => {
                   triggerWithLoading(
                     () => setActiveTab('DASHBOARD'),
-                    'Carregando Consolidado...'
-                  )
-                }
-                aria-current={activeTab === 'DASHBOARD' ? 'page' : undefined}
-                className={`inline-flex h-6.5 items-center gap-1 rounded-md px-2.5 text-xs font-semibold whitespace-nowrap transition-all ${
+                    'Carregando Consolidado & Analytics...'
+                  );
+                  setIsMobileSidebarOpen(false);
+                }}
+                title={isCollapsedView ? 'Consolidado & Analytics' : undefined}
+                className={`sidebar-nav-item group relative flex w-full items-center ${
+                  isCollapsedView ? 'justify-center px-0 py-2.5' : 'justify-between px-3 py-2'
+                } rounded-xl text-xs font-semibold transition-all duration-200 ${
                   activeTab === 'DASHBOARD'
-                    ? 'bg-white text-[#004A8D] shadow-2xs'
-                    : 'text-sky-100 hover:bg-white/10 hover:text-white'
+                    ? 'bg-[var(--color-primary)] text-white shadow-sm'
+                    : 'text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]'
                 }`}
               >
-                <LayoutDashboard className="h-3 w-3 shrink-0" />
-                <span>Consolidado</span>
-              </button>
-
-              <button
-                type="button"
-                data-testid="tab-portal-aluno"
-                onClick={() =>
-                  triggerWithLoading(() => {
-                    setPortalHubStudentId(null);
-                    setActiveTab('PORTAL_ALUNO');
-                  }, 'Carregando Ficha Individual do Aluno...')
-                }
-                aria-current={activeTab === 'PORTAL_ALUNO' ? 'page' : undefined}
-                className={`inline-flex h-6.5 items-center gap-1 rounded-md px-2.5 text-xs font-semibold whitespace-nowrap transition-all ${
-                  activeTab === 'PORTAL_ALUNO'
-                    ? 'bg-white text-[#004A8D] shadow-2xs'
-                    : 'text-sky-100 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <GraduationCap className="h-3 w-3 shrink-0" />
-                <span>Ficha Individual</span>
-              </button>
-            </nav>
-          ) : (
-            <div className="order-2 hidden items-center gap-1.5 text-xs font-semibold text-sky-100 lg:flex">
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />
-              <span>Gestão Centralizada de Unidades e Credenciais</span>
+                <span className="flex items-center gap-2.5 truncate">
+                  <LayoutDashboard className="h-4 w-4 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+                  {!isCollapsedView && (
+                    <span className="truncate">Consolidado & Analytics</span>
+                  )}
+                </span>
+              </motion.button>
             </div>
+
+            {/* Categoria 2: Acadêmico & Secretaria */}
+            <div className="space-y-1 pt-1">
+              {!isCollapsedView && (
+                <p className="px-2 text-[10px] font-bold tracking-wider uppercase text-[var(--text-secondary)]">
+                  Acadêmico & Secretaria
+                </p>
+              )}
+              <div>
+                <motion.button
+                  whileHover={{ x: isCollapsedView ? 0 : 3 }}
+                  whileTap={{ scale: 0.98 }}
+                  transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+                  type="button"
+                  data-testid="tab-portal-aluno"
+                  aria-current={activeTab === 'PORTAL_ALUNO' ? 'page' : undefined}
+                  onClick={() => {
+                    if (isCollapsedView) {
+                      triggerWithLoading(() => {
+                        setActiveTab('PORTAL_ALUNO');
+                      }, 'Carregando Ficha Individual do Aluno...');
+                      setIsMobileSidebarOpen(false);
+                    } else {
+                      if (activeTab === 'PORTAL_ALUNO') {
+                        setIsAcademicSubmenuOpen((prev) => !prev);
+                      } else {
+                        setIsAcademicSubmenuOpen(true);
+                        triggerWithLoading(() => {
+                          setActiveTab('PORTAL_ALUNO');
+                        }, 'Carregando Ficha Individual do Aluno...');
+                      }
+                    }
+                  }}
+                  title={isCollapsedView ? 'Ficha Individual do Aluno' : undefined}
+                  className={`sidebar-nav-item group flex w-full items-center ${
+                    isCollapsedView ? 'justify-center px-0 py-2.5' : 'justify-between px-3 py-2'
+                  } rounded-xl text-xs font-semibold transition-all duration-200 ${
+                    activeTab === 'PORTAL_ALUNO'
+                      ? 'bg-[var(--color-primary)] text-white shadow-sm'
+                      : 'text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <GraduationCap className="h-4 w-4 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+                    {!isCollapsedView && <span className="truncate">Ficha Individual</span>}
+                  </span>
+                  {!isCollapsedView && (
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${
+                        isAcademicSubmenuOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  )}
+                </motion.button>
+
+                <AnimatePresence initial={false}>
+                  {!isCollapsedView && isAcademicSubmenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+                      className="overflow-hidden"
+                    >
+                      <div className="mt-1 ml-3 space-y-0.5 border-l border-[var(--border-color)] pl-2.5">
+                        {(
+                          [
+                            { id: 'BOLETIM', label: 'Boletim Acadêmico', icon: FileSpreadsheet, testId: 'sidebar-subtab-boletim' },
+                            { id: 'ACOMPANHAMENTO', label: 'Ficha de Acompanhamento', icon: BookOpen, testId: 'sidebar-subtab-acompanhamento' },
+                            { id: 'CARTEIRINHA', label: 'Carteirinha Estudantil', icon: IdCard, testId: 'sidebar-subtab-carteirinha' },
+                            { id: 'DECLARACAO', label: 'Declaração de Matrícula', icon: FileText, testId: 'sidebar-subtab-declaracao' },
+                          ] as const
+                        ).map((sub) => {
+                          const SubIcon = sub.icon;
+                          const isSubActive =
+                            activeTab === 'PORTAL_ALUNO' && portalHubInitialSubTab === sub.id;
+                          return (
+                            <motion.button
+                              key={sub.id}
+                              whileHover={{ x: 3 }}
+                              whileTap={{ scale: 0.98 }}
+                              transition={{ duration: 0.16, ease: [0.2, 0.8, 0.2, 1] }}
+                              type="button"
+                              data-testid={sub.testId}
+                              onClick={() => {
+                                setPortalHubInitialSubTab(sub.id);
+                                setActiveTab('PORTAL_ALUNO');
+                                setIsMobileSidebarOpen(false);
+                              }}
+                              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-all duration-200 ${
+                                isSubActive
+                                  ? 'bg-[var(--color-primary)]/12 font-semibold text-[var(--color-primary)] shadow-2xs'
+                                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]'
+                              }`}
+                            >
+                              <SubIcon className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">{sub.label}</span>
+                            </motion.button>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Categoria 3: Gestão, Exportação & Governança */}
+        <div className="space-y-1 pt-1">
+          {!isCollapsedView && (
+            <p className="px-2 text-[10px] font-bold tracking-wider uppercase text-[var(--text-secondary)]">
+              Gestão & Governança
+            </p>
+          )}
+          <motion.button
+            whileHover={{ x: isCollapsedView ? 0 : 3 }}
+            whileTap={{ scale: 0.98 }}
+            transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+            type="button"
+            onClick={() => {
+              setIsExportStudioOpen(true);
+              setIsMobileSidebarOpen(false);
+            }}
+            title={isCollapsedView ? 'Estúdio de Exportação' : undefined}
+            className={`group flex w-full items-center ${
+              isCollapsedView ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-3 py-2'
+            } rounded-xl text-xs font-medium text-[var(--text-primary)] transition-all duration-200 hover:bg-[var(--bg-secondary)]`}
+          >
+            <Download className="h-4 w-4 shrink-0 text-[var(--color-primary)] transition-transform duration-200 group-hover:scale-110" />
+            {!isCollapsedView && <span className="truncate">Estúdio de Exportação</span>}
+          </motion.button>
+
+          {authSession.role === 'ESCOLA' && (
+            <motion.button
+              whileHover={{ x: isCollapsedView ? 0 : 3 }}
+              whileTap={{ scale: 0.98 }}
+              transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+              type="button"
+              onClick={() => {
+                setIsFilterDrawerOpen(true);
+                setIsMobileSidebarOpen(false);
+              }}
+              title={isCollapsedView ? 'Resumo de Filtros Ativos' : undefined}
+              className={`group flex w-full items-center ${
+                isCollapsedView ? 'justify-center px-0 py-2.5' : 'justify-between px-3 py-2'
+              } rounded-xl text-xs font-medium text-[var(--text-primary)] transition-all duration-200 hover:bg-[var(--bg-secondary)]`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <Filter className="h-4 w-4 shrink-0 text-[var(--color-secondary)] transition-transform duration-200 group-hover:scale-110" />
+                {!isCollapsedView && <span className="truncate">Painel de Filtros</span>}
+              </span>
+              {!isCollapsedView &&
+                (hasActiveStudentFilters || hasActiveNpsFilters) && (
+                  <span className="h-2 w-2 rounded-full bg-[var(--color-primary)]" />
+                )}
+            </motion.button>
           )}
 
-          {/* Direita: Sincronização Compacta + Usuário + Tema + Sair */}
-          <div className="order-2 flex shrink-0 items-center gap-1.5 lg:order-3">
-            {enteredSchoolFromAdmin && authSession.role !== 'ADMIN' && (
-              <button
-                type="button"
-                data-testid="header-back-to-admin-btn"
-                onClick={() =>
-                  setAuthSession((prev) => ({
-                    role: 'ADMIN',
-                    login: DEFAULT_ADMIN_CREDENTIALS.login,
-                    nomeCompleto: DEFAULT_ADMIN_CREDENTIALS.nomeCompleto,
-                    cargo: DEFAULT_ADMIN_CREDENTIALS.cargo,
-                    sessionToken: prev?.sessionToken,
-                  }))
-                }
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-300/40 bg-amber-500/20 px-2 text-[11px] font-bold text-amber-100 whitespace-nowrap transition-colors hover:bg-amber-500/30"
-              >
-                <KeyRound className="h-3 w-3 text-amber-300" />
-                <span>Painel ADM</span>
-              </button>
+          <motion.button
+            whileHover={{ x: isCollapsedView ? 0 : 3 }}
+            whileTap={{ scale: 0.98 }}
+            transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+            type="button"
+            onClick={() => {
+              setShowPrivacyPage(true);
+              setIsMobileSidebarOpen(false);
+            }}
+            title={isCollapsedView ? 'Privacidade e LGPD' : undefined}
+            className={`group flex w-full items-center ${
+              isCollapsedView ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-3 py-2'
+            } rounded-xl text-xs font-medium text-[var(--text-primary)] transition-all duration-200 hover:bg-[var(--bg-secondary)]`}
+          >
+            <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-500 transition-transform duration-200 group-hover:scale-110" />
+            {!isCollapsedView && <span className="truncate">Privacidade & LGPD</span>}
+          </motion.button>
+        </div>
+      </div>
+
+      {/* Rodapé da Sidebar: Identificação Institucional do Operador (sem botões duplicados de Tema ou Sair) */}
+      <div className="border-t border-[var(--border-color)] p-2.5">
+        <div
+          className={`flex items-center ${
+            isCollapsedView ? 'justify-center' : 'justify-between gap-2'
+          } rounded-xl bg-[var(--bg-secondary)]/70 p-2`}
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            <SmartAvatar
+              name={activeUserFullName || 'Operador Microlins'}
+              status="success"
+              size="sm"
+            />
+            {!isCollapsedView && (
+              <div className="min-w-0">
+                <p className="truncate text-xs font-bold text-[var(--text-primary)]">
+                  {activeUserFullName}
+                </p>
+                <p className="truncate text-[10px] font-medium text-[var(--text-secondary)]">
+                  {activeUserRole} · #{activeUserLogin}
+                </p>
+              </div>
             )}
-
-            <div
-              data-testid="sync-status-badge"
-              className="hidden items-center gap-1 text-[11px] font-medium text-emerald-200 xl:inline-flex"
-              title="Integração Portal do Aluno e Indecx NPS ativa"
-            >
-              <CheckCircle2 className="h-3 w-3 text-emerald-300" />
-              <span className="sr-only 2xl:not-sr-only">Sincronizado</span>
-            </div>
-
-            <div
-              data-testid="sync-timestamp-badge"
-              className="hidden items-center gap-1 text-[11px] text-sky-200 tabular-nums whitespace-nowrap xl:inline-flex"
-              title={`Horário oficial de Brasília: ${lastSyncTimestamp}`}
-            >
-              <Clock className="h-3 w-3 text-sky-300" />
-              <span>{lastSyncTimestamp}</span>
-            </div>
-
-            <div className="hidden h-3.5 w-px bg-white/15 xl:block" />
-
-            <div
-              data-testid="header-user-session-info"
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/15 bg-[#003669] px-2 text-[11px] text-sky-100 whitespace-nowrap"
-              title={`${activeUserFullName} · ${activeUserRole} (#${activeUserLogin})`}
-            >
-              <UserCheck className="h-3 w-3 shrink-0 text-sky-200" />
-              <span
-                data-testid="header-user-fullname"
-                className="max-w-[140px] truncate font-semibold text-white"
-              >
-                {activeUserFullName}
-              </span>
-              <span
-                data-testid="header-user-role"
-                className="sr-only 2xl:not-sr-only 2xl:inline-flex 2xl:items-center 2xl:gap-1 text-[11px] text-sky-200"
-              >
-                <span>· {activeUserRole}</span>
-                <span className="text-sky-300/80">(#{activeUserLogin})</span>
-              </span>
-            </div>
-
-            <button
-              type="button"
-              data-testid="theme-toggle-button"
-              onClick={toggleTheme}
-              aria-label={theme === 'light' ? 'Ativar tema escuro' : 'Ativar tema claro'}
-              title={theme === 'light' ? 'Alternar para o Tema Escuro' : 'Alternar para o Tema Claro'}
-              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/20 bg-white/10 text-white transition-colors hover:bg-white/20"
-            >
-              {theme === 'light' ? (
-                <Moon className="h-3.5 w-3.5 text-sky-100" />
-              ) : (
-                <Sun className="h-3.5 w-3.5 text-amber-300" />
-              )}
-            </button>
-
-            <button
-              type="button"
-              data-testid="header-logout-btn"
-              onClick={handleLogout}
-              title="Sair da plataforma"
-              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-rose-300/30 bg-rose-500/20 px-2.5 text-[11px] font-bold text-rose-100 whitespace-nowrap transition-colors hover:bg-rose-500/35"
-            >
-              <LogOut className="h-3 w-3 text-rose-200" />
-              <span>Sair</span>
-            </button>
           </div>
         </div>
-      </header>
+      </div>
+    </div>
+  );
 
-      {/* Se o usuário logado estiver no PERFIL ADMINISTRADOR, renderiza o Painel Administrador */}
-      {authSession.role === 'ADMIN' ? (
-        <AdminPanelView
-          schools={schoolsRegistry}
-          onSchoolsChange={setSchoolsRegistry}
-          sessionToken={authSession.sessionToken}
-          onAccessSchoolAsProfile={(schoolSession) => {
-            setAuthSession({
-              ...schoolSession,
-              sessionToken: authSession.sessionToken,
-            });
-            setEnteredSchoolFromAdmin(true);
-            setPortalMeta((prev) => ({
-              ...prev,
-              unidade: schoolSession.schoolName || prev.unidade,
-              usuarioLogin: schoolSession.login,
-              usuarioNomeCompleto: schoolSession.nomeCompleto,
-              usuarioCargo: schoolSession.cargo,
-            }));
-          }}
-        />
-      ) : (
-        <>
-          {/* REGIÃO 2: ÁREA DE FILTROS PADRONIZADA EM 2 LINHAS */}
-          {activeTab !== 'DASHBOARD' && activeTab !== 'PORTAL_ALUNO' && (
-            <section
-              aria-label="Filtros do painel ativo"
-              data-testid="filters-section"
-              className="shrink-0 border-b border-slate-200/90 bg-white px-3 py-1.5 transition-colors sm:px-5 dark:border-slate-800 dark:bg-slate-900"
-            >
-              {activeTab === 'KANBAN_ALUNOS' ? (
-                /* 9 controles distribuídos em 5 colunas x 2 linhas (Sala ocupa 2 colunas na 1ª linha) */
-                <div
-                  data-testid="filters-row-1"
-                  className="grid grid-cols-2 gap-1.5 sm:grid-cols-5"
+  return (
+    <ToastProvider>
+      <div
+        data-theme-mode={theme}
+        className="flex h-screen w-full max-w-[100vw] flex-col overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)] transition-colors duration-200"
+      >
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[200] focus:rounded-lg focus:bg-[#2563EB] focus:px-4 focus:py-2 focus:text-xs focus:font-bold focus:text-white focus:shadow-lg"
+        >
+          Pular para o conteúdo principal
+        </a>
+
+        {/* REGIÃO 1: CABEÇALHO PADRONIZADO — IDENTIFICAÇÃO, BARRA DE PESQUISA ÚNICA E AÇÕES DO USUÁRIO */}
+        <header
+          data-testid="main-header"
+          className="shrink-0 border-b border-[#00386B] bg-[#004A8D] text-white shadow-2xs dark:border-slate-800 dark:bg-[#0F172A]"
+        >
+          <div className="flex min-h-11 w-full flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 sm:gap-3 sm:px-4 lg:flex-nowrap">
+            {/* Esquerda: Botão Mobile Sidebar + Logo Oficial da Microlins + Nome da Escola */}
+            <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2">
+              <button
+                type="button"
+                onClick={() => setIsMobileSidebarOpen(true)}
+                aria-label="Abrir menu lateral"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/10 text-white hover:bg-white/20 lg:hidden"
+              >
+                <Menu className="h-4 w-4" />
+              </button>
+              <img
+                src="/assets/aistudio/logo-microlins_6400203f.png"
+                alt="Microlins"
+                className="h-4 sm:h-5 w-auto shrink-0 object-contain brightness-0 invert"
+                data-testid="header-microlins-logo"
+              />
+              <div className="hidden h-4 w-px bg-white/20 sm:block" />
+              <div className="flex min-w-0 items-center gap-1 sm:gap-1.5">
+                <Building2 className="hidden h-3.5 w-3.5 shrink-0 text-sky-200 min-[380px]:block" />
+                <span
+                  data-testid="header-school-name"
+                  className="max-w-[120px] min-[380px]:max-w-[160px] sm:max-w-[210px] truncate text-[11px] sm:text-xs font-bold tracking-tight text-white xl:max-w-[250px]"
                 >
+                  {activeSchoolName}
+                </span>
+              </div>
+            </div>
+
+            {/* Centro: Barra de Pesquisa Única e Exclusiva do Sistema */}
+            <div
+              ref={headerSearchContainerRef}
+              className="order-3 relative w-full max-w-full flex-1 lg:order-2 lg:mx-4 lg:max-w-xl"
+            >
+              <div className="relative flex items-center">
+                <Search className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-sky-200" />
+                <input
+                  ref={headerSearchInputRef}
+                  id="header-global-search-input"
+                  data-testid="header-global-search-input"
+                  type="search"
+                  value={globalSearchQuery}
+                  onFocus={() => setIsHeaderSearchDropdownOpen(true)}
+                  onChange={(e) => {
+                    setGlobalSearchQuery(e.target.value);
+                    setIsHeaderSearchDropdownOpen(true);
+                  }}
+                  placeholder={
+                    authSession.role === 'ADMIN'
+                      ? 'Pesquisar escola, código da unidade, cidade ou usuário...'
+                      : 'Pesquisar aluno, contrato, curso, educador ou sala... (Ctrl+K)'
+                  }
+                  aria-label="Pesquisa global do sistema"
+                  className="h-8 w-full rounded-lg border border-white/20 bg-[#003669]/90 pl-8 pr-16 text-xs text-white placeholder:text-sky-200/75 focus:border-sky-300 focus:bg-[#002D5A] focus:outline-none dark:border-slate-700 dark:bg-slate-900/90 dark:focus:border-sky-400"
+                />
+                {globalSearchQuery ? (
+                  <button
+                    type="button"
+                    data-testid="header-global-search-clear"
+                    onClick={() => {
+                      setGlobalSearchQuery('');
+                      headerSearchInputRef.current?.focus();
+                    }}
+                    title="Limpar pesquisa"
+                    className="absolute right-2 inline-flex h-5 w-5 items-center justify-center rounded text-sky-200 hover:bg-white/15 hover:text-white"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                ) : (
+                  <kbd className="pointer-events-none absolute right-2 hidden rounded border border-white/15 bg-black/20 px-1.5 py-0.5 font-mono text-[10px] text-sky-200 sm:inline-block">
+                    Ctrl K
+                  </kbd>
+                )}
+              </div>
+
+              {/* Dropdown de Acesso Rápido a Alunos e Documentos */}
+              {authSession.role === 'ESCOLA' &&
+                isHeaderSearchDropdownOpen &&
+                globalSearchQuery.trim().length > 0 && (
+                  <div
+                    data-testid="header-search-results-dropdown"
+                    className="absolute left-0 right-0 top-full z-50 mt-1.5 max-h-80 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 text-slate-800 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  >
+                    <div className="flex items-center justify-between border-b border-slate-100 px-2 pb-1.5 text-[10px] font-bold tracking-wider uppercase text-slate-400 dark:border-slate-800">
+                      <span>
+                        Filtro ativo no módulo atual · Acesso Rápido a Alunos ({headerQuickStudentMatches.length})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsHeaderSearchDropdownOpen(false)}
+                        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        Fechar
+                      </button>
+                    </div>
+                    {headerQuickStudentMatches.length === 0 ? (
+                      <p className="px-2 py-2.5 text-xs text-slate-500 dark:text-slate-400">
+                        Nenhum aluno encontrado pelo termo &ldquo;{globalSearchQuery}&rdquo;.
+                      </p>
+                    ) : (
+                      <div className="mt-1 space-y-1">
+                        {headerQuickStudentMatches.map((st) => (
+                          <div
+                            key={st.contrato}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800/80"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (activeTab === 'PORTAL_ALUNO') {
+                                  setPortalHubStudentId(st.id);
+                                } else {
+                                  setSelectedStudentId(st.id);
+                                }
+                                setIsHeaderSearchDropdownOpen(false);
+                              }}
+                              className="min-w-0 flex-1 text-left"
+                            >
+                              <p className="truncate text-xs font-bold text-slate-900 dark:text-white">
+                                {st.nomeCompleto}
+                              </p>
+                              <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                                Contrato #{st.contrato} · {st.curso} · {st.diaSemana} ({st.horaInicio})
+                              </p>
+                            </button>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPortalHubStudentId(st.id);
+                                  setActiveTab('PORTAL_ALUNO');
+                                  setIsHeaderSearchDropdownOpen(false);
+                                }}
+                                className="rounded-md bg-[#004A8D] px-2 py-1 text-[10px] font-bold text-white hover:bg-[#00386B]"
+                              >
+                                Ficha Individual
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+            </div>
+
+            {/* Direita: Sincronização Compacta + Nome e Cargo Reais do Usuário + Tema + Sair */}
+            <div className="order-2 flex shrink-0 items-center gap-1.5 lg:order-3">
+              {enteredSchoolFromAdmin && authSession.role !== 'ADMIN' && (
+                <button
+                  type="button"
+                  data-testid="header-back-to-admin-btn"
+                  onClick={() =>
+                    setAuthSession((prev) => ({
+                      role: 'ADMIN',
+                      login: DEFAULT_ADMIN_CREDENTIALS.login,
+                      nomeCompleto: DEFAULT_ADMIN_CREDENTIALS.nomeCompleto,
+                      cargo: DEFAULT_ADMIN_CREDENTIALS.cargo,
+                      sessionToken: prev?.sessionToken,
+                    }))
+                  }
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-300/40 bg-amber-500/20 px-2 text-[11px] font-bold text-amber-100 whitespace-nowrap transition-colors hover:bg-amber-500/30"
+                >
+                  <KeyRound className="h-3 w-3 text-amber-300" />
+                  <span>Painel ADM</span>
+                </button>
+              )}
+
+              <div
+                data-testid="sync-status-badge"
+                className="hidden items-center gap-1 text-[11px] font-medium text-emerald-200 xl:inline-flex"
+                title="Integração Portal do Aluno e Indecx NPS ativa"
+              >
+                <CheckCircle2 className="h-3 w-3 text-emerald-300" />
+                <span className="sr-only 2xl:not-sr-only">Sincronizado</span>
+              </div>
+
+              <div
+                data-testid="sync-timestamp-badge"
+                className="hidden items-center gap-1 text-[11px] text-sky-200 tabular-nums whitespace-nowrap xl:inline-flex"
+                title={`Horário oficial de Brasília: ${lastSyncTimestamp}`}
+              >
+                <Clock className="h-3 w-3 text-sky-300" />
+                <span>{lastSyncTimestamp}</span>
+              </div>
+
+              <div className="hidden h-3.5 w-px bg-white/15 xl:block" />
+
+              <div
+                data-testid="header-user-session-info"
+                className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/15 bg-[#003669] px-2.5 text-[11px] text-sky-100 whitespace-nowrap"
+                title={`${activeUserFullName} · ${activeUserRole} (#${activeUserLogin})`}
+              >
+                <UserCheck className="h-3 w-3 shrink-0 text-sky-200" />
+                <span
+                  data-testid="header-user-fullname"
+                  className="max-w-[130px] sm:max-w-[190px] truncate font-semibold text-white"
+                >
+                  {activeUserFullName}
+                </span>
+                <span
+                  data-testid="header-user-role"
+                  className="hidden sm:inline-flex items-center gap-1 text-[11px] text-sky-200"
+                >
+                  <span>· {activeUserRole}</span>
+                  <span className="hidden md:inline text-sky-300/80">
+                    (#{activeUserLogin})
+                  </span>
+                </span>
+              </div>
+
+              <button
+                type="button"
+                data-testid="theme-toggle-button"
+                onClick={toggleTheme}
+                aria-label={theme === 'light' ? 'Ativar tema escuro' : 'Ativar tema claro'}
+                title={theme === 'light' ? 'Alternar para o Tema Escuro' : 'Alternar para o Tema Claro'}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/20 bg-white/10 text-white transition-colors hover:bg-white/20"
+              >
+                {theme === 'light' ? (
+                  <Moon className="h-3.5 w-3.5 text-sky-100" />
+                ) : (
+                  <Sun className="h-3.5 w-3.5 text-amber-300" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                data-testid="header-logout-btn"
+                onClick={handleLogout}
+                title="Sair da plataforma"
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-rose-300/30 bg-rose-500/20 px-2 sm:px-2.5 text-[11px] font-bold text-rose-100 whitespace-nowrap transition-colors hover:bg-rose-500/35"
+              >
+                <LogOut className="h-3 w-3 text-rose-200" />
+                <span>Sair</span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+      {/* CORPO PRINCIPAL: SIDEBAR INTELIGENTE RETRÁTIL + COLUNA DE CONTEÚDO */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* Sidebar Desktop Retrátil com Glassmorphism */}
+        <aside
+          data-testid="smart-sidebar"
+          aria-label="Menu Lateral Inteligente"
+          className={`glass-sidebar hidden shrink-0 transition-all duration-300 lg:block ${
+            isSidebarCollapsed ? 'w-[74px]' : 'w-[268px]'
+          }`}
+        >
+          {renderSidebarContent(isSidebarCollapsed)}
+        </aside>
+
+        {/* Sidebar Mobile Drawer */}
+        <AnimatePresence>
+          {isMobileSidebarOpen && (
+            <div className="fixed inset-0 z-50 flex lg:hidden">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsMobileSidebarOpen(false)}
+                className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+              />
+              <motion.aside
+                initial={{ x: -280 }}
+                animate={{ x: 0 }}
+                exit={{ x: -280 }}
+                transition={{ duration: 0.24, ease: [0.2, 0.8, 0.2, 1] }}
+                className="glass-sidebar relative z-10 flex h-full w-[268px] flex-col"
+              >
+                <div className="flex items-center justify-between border-b border-[var(--border-color)] px-3 py-2.5">
+                  <span className="typo-subtitle font-bold text-[var(--text-primary)]">
+                    Navegação Microlins
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsMobileSidebarOpen(false)}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-[var(--border-color)] text-[var(--text-secondary)]"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="min-h-0 flex-1">
+                  {renderSidebarContent(false)}
+                </div>
+              </motion.aside>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Coluna Direita Principal */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Se o usuário logado estiver no PERFIL ADMINISTRADOR, renderiza o Painel Administrador */}
+          {authSession.role === 'ADMIN' ? (
+            <main id="main-content" className="min-h-0 flex-1 overflow-y-auto">
+              <AdminPanelView
+                schools={schoolsRegistry}
+                onSchoolsChange={setSchoolsRegistry}
+                sessionToken={authSession.sessionToken}
+                externalSearchQuery={globalSearchQuery}
+                onAccessSchoolAsProfile={(schoolSession) => {
+                  setAuthSession({
+                    ...schoolSession,
+                    sessionToken: authSession.sessionToken,
+                  });
+                  setEnteredSchoolFromAdmin(true);
+                  setPortalMeta((prev) => ({
+                    ...prev,
+                    unidade: schoolSession.schoolName || prev.unidade,
+                    usuarioLogin: schoolSession.login,
+                    usuarioNomeCompleto: schoolSession.nomeCompleto,
+                    usuarioCargo: schoolSession.cargo,
+                  }));
+                }}
+              />
+            </main>
+          ) : (
+            <>
+              {/* REGIÃO 2: ÁREA DE FILTROS PADRONIZADA EM 2 LINHAS */}
+              {activeTab !== 'DASHBOARD' && activeTab !== 'PORTAL_ALUNO' && (
+                <section
+                  aria-label="Filtros do painel ativo"
+                  data-testid="filters-section"
+                  className="glass-panel shrink-0 border-b border-[var(--border-color)] px-3 py-1.5 transition-colors sm:px-5"
+                >
+                  {activeTab === 'KANBAN_ALUNOS' ? (
+                    /* 9 controles distribuídos em 5 colunas x 2 linhas */
+                    <div
+                      data-testid="filters-row-1"
+                      className="grid grid-cols-2 gap-1.5 sm:grid-cols-5"
+                    >
                   {/* Linha 1 - Col 1: Dia da Semana */}
                   <div className="relative">
                     <label htmlFor="filter-dia-semana" className="sr-only">
@@ -1989,7 +2628,7 @@ export default function App() {
                 /* 6 Cards organizados em 2 linhas de 3 cards (grid-cols-3) com ícone (?) explicativo */
                 <div
                   data-testid="student-summary-cards-grid"
-                  className="grid grid-cols-3 gap-1.5"
+                  className="grid grid-cols-2 gap-1.5 sm:grid-cols-3"
                 >
                   {/* Linha 1 - Card 1: Presenças */}
                   <div
@@ -2453,7 +3092,8 @@ export default function App() {
 
           {/* REGIÃO 4: ÁREA PRINCIPAL DOS KANBANS, DASHBOARD OU PORTAL DO ALUNO */}
           <main
-            className={`relative min-h-0 flex-1 px-3 py-1.5 sm:px-5 ${
+            id="main-content"
+            className={`relative min-h-0 flex-1 px-2.5 py-1.5 sm:px-5 ${
               activeTab === 'PORTAL_ALUNO' || activeTab === 'DASHBOARD'
                 ? 'overflow-y-auto'
                 : 'overflow-hidden'
@@ -2466,40 +3106,61 @@ export default function App() {
                   : 'opacity-100'
               }`}
             >
-              {activeTab === 'KANBAN_ALUNOS' ? (
-                <HourKanbanBoard
-                  columns={studentKanbanColumns}
-                  onSelectStudent={setSelectedStudentId}
-                />
-              ) : activeTab === 'KANBAN_NPS' ? (
-                <NpsHourKanbanBoard
-                  columns={npsKanbanColumns}
-                  onSelectStudentCard={setSelectedNpsStudentCard}
-                  currentTimeStr={currentTimeStr}
-                  onInvitationUpdated={handleNpsInvitationUpdated}
-                  operatorLogin={activeUserLogin}
-                  operatorRole={authSession?.role || 'COORDENACAO'}
-                />
-              ) : activeTab === 'DASHBOARD' ? (
-                <DashboardView
-                  allEvaluatedRecords={allEvaluatedRecords}
-                  onSelectStudentRecord={setSelectedStudentId}
-                  activeNpsInvitations={activeNpsInvitations}
-                  onMaterialCauseUpdated={handleMaterialCauseUpdated}
-                />
-              ) : (
-                <div className="h-full overflow-y-auto pr-1">
-                  <PortalAlunoHubView
-                    allStudents={allEvaluatedRecords}
-                    selectedStudentId={portalHubStudentId}
-                    onSelectStudentId={(id) => setPortalHubStudentId(id)}
-                    unidadeAtual={portalMeta.unidade}
-                    initialSubTab={portalHubInitialSubTab}
-                    activeNpsInvitations={activeNpsInvitations}
-                    onNpsInvitationUpdated={handleNpsInvitationUpdated}
-                  />
-                </div>
-              )}
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+                  className="h-full w-full"
+                >
+                  {activeTab === 'KANBAN_ALUNOS' ? (
+                    <HourKanbanBoard
+                      columns={studentKanbanColumns}
+                      onSelectStudent={setSelectedStudentId}
+                    />
+                  ) : activeTab === 'KANBAN_NPS' ? (
+                    <NpsHourKanbanBoard
+                      columns={npsKanbanColumns}
+                      onSelectStudentCard={setSelectedNpsStudentCard}
+                      currentTimeStr={currentTimeStr}
+                      onInvitationUpdated={handleNpsInvitationUpdated}
+                      operatorLogin={activeUserLogin}
+                      operatorRole={authSession?.role || 'COORDENACAO'}
+                    />
+                  ) : activeTab === 'DASHBOARD' ? (
+                    <DashboardView
+                      allEvaluatedRecords={allEvaluatedRecords}
+                      onSelectStudentRecord={setSelectedStudentId}
+                      activeNpsInvitations={activeNpsInvitations}
+                      onMaterialCauseUpdated={handleMaterialCauseUpdated}
+                      externalSearchQuery={globalSearchQuery}
+                      onExternalSearchChange={setGlobalSearchQuery}
+                    />
+                  ) : (
+                    <div className="h-full overflow-y-auto pr-1">
+                      <PortalAlunoHubView
+                        allStudents={allEvaluatedRecords}
+                        selectedStudentId={portalHubStudentId}
+                        onSelectStudentId={(id) => setPortalHubStudentId(id)}
+                        unidadeAtual={portalMeta.unidade}
+                        initialSubTab={portalHubInitialSubTab}
+                        onSubTabChange={(sub) => setPortalHubInitialSubTab(sub)}
+                        activeNpsInvitations={activeNpsInvitations}
+                        onNpsInvitationUpdated={handleNpsInvitationUpdated}
+                        externalSearchQuery={globalSearchQuery}
+                        onExternalSearchChange={setGlobalSearchQuery}
+                        onFocusHeaderSearch={() => {
+                          headerSearchInputRef.current?.focus();
+                          headerSearchInputRef.current?.select();
+                          setIsHeaderSearchDropdownOpen(true);
+                        }}
+                      />
+                    </div>
+                  )}
+                </motion.div>
+              </AnimatePresence>
             </div>
 
             {isLoading && (
@@ -2509,13 +3170,13 @@ export default function App() {
                 aria-live="polite"
                 className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/20 backdrop-blur-[1.5px] transition-opacity duration-100"
               >
-                <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-5 py-3 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#004A8D] dark:text-sky-400" />
+                <div className="glass-modal flex items-center gap-3 rounded-xl px-5 py-3 shadow-lg">
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--color-primary)]" />
                   <div className="flex flex-col">
-                    <span className="typo-subtitle font-bold text-slate-900 dark:text-slate-100">
+                    <span className="typo-subtitle font-bold text-[var(--text-primary)]">
                       Processando atualização...
                     </span>
-                    <span className="typo-meta text-slate-600 dark:text-slate-400">
+                    <span className="typo-meta text-[var(--text-secondary)]">
                       {loadingMessage}
                     </span>
                   </div>
@@ -2523,8 +3184,10 @@ export default function App() {
               </div>
             )}
           </main>
-        </>
-      )}
+            </>
+          )}
+        </div>
+      </div>
 
       {/* REGIÃO 5: RODAPÉ MINIMALISTA E COMPACTO DE LINHA ÚNICA (Seção 14) */}
       <footer
@@ -2596,6 +3259,129 @@ export default function App() {
         operatorLogin={activeUserLogin}
         operatorRole={authSession?.role || 'COORDENACAO'}
       />
-    </div>
+
+      {/* Command Palette Global (Ctrl + K / Cmd + K) */}
+      <CommandPaletteModal
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        students={allEvaluatedRecords}
+        npsCards={synchronizedNpsStudentCards}
+        educators={educadorOptions}
+        salas={salaOptions}
+        horarios={horarioOptions}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onNavigateTab={(tab) => setActiveTab(tab)}
+        onOpenStudentModal={(studentId) => setSelectedStudentId(studentId)}
+        onOpenStudentFicha={(studentId, subTab) => {
+          setPortalHubStudentId(studentId);
+          setPortalHubInitialSubTab(subTab || 'BOLETIM');
+          setActiveTab('PORTAL_ALUNO');
+        }}
+        onOpenNpsModal={(card) => setSelectedNpsStudentCard(card)}
+        onApplyEducatorFilter={(educator) => {
+          setSelectedEducador(educator);
+          setActiveTab('KANBAN_ALUNOS');
+        }}
+        onApplySalaFilter={(sala) => {
+          setSelectedSala(sala);
+          setActiveTab('KANBAN_ALUNOS');
+        }}
+        onApplyHorarioFilter={(horario) => {
+          setSelectedHorario(horario);
+          setActiveTab('KANBAN_ALUNOS');
+        }}
+        onApplyFinancialFilter={(status) => {
+          setSelectedFinancialStatus(status);
+          setActiveTab('KANBAN_ALUNOS');
+        }}
+        onApplyQuickStatusFilter={(status) => {
+          setStatusFilter(status);
+          setActiveTab('KANBAN_ALUNOS');
+        }}
+        onSyncNow={() => {
+          syncPortalData();
+          emitGlobalToast({
+            variant: 'success',
+            title: 'Sincronização iniciada',
+            description: 'Dados do Portal do Aluno e Indecx NPS atualizados.',
+          });
+        }}
+        onOpenPrivacy={() => setShowPrivacyPage(true)}
+      />
+
+      {/* Estúdio de Exportação Avançado */}
+      <ExportStudioModal
+        isOpen={isExportStudioOpen}
+        onClose={() => setIsExportStudioOpen(false)}
+        allRecords={allEvaluatedRecords}
+        filteredRecords={activeStudentRecords}
+        notesByContract={{}}
+        onTriggerPrint={() => window.print()}
+      />
+
+      {/* Drawer Lateral de Diagnóstico Rápido de Filtros */}
+      <SlideOverDrawer
+        isOpen={isFilterDrawerOpen}
+        onClose={() => setIsFilterDrawerOpen(false)}
+        title="Diagnóstico de Filtros & Operação"
+        subtitle={`Unidade: ${activeSchoolName} · Horário Brasília: ${currentTimeStr}`}
+      >
+        <div className="space-y-4">
+          <div className="glass-card rounded-xl p-4">
+            <h4 className="typo-subtitle font-bold text-[var(--text-primary)]">
+              Resumo do Kanban de Alunos
+            </h4>
+            <p className="typo-meta mt-1 text-[var(--text-secondary)]">
+              Exibindo {activeStudentRecords.length} de {allEvaluatedRecords.length} agendamentos totais na semana.
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
+                <span className="text-[var(--text-secondary)]">Dia:</span>{' '}
+                <strong className="text-[var(--text-primary)]">{selectedDiaSemana}</strong>
+              </div>
+              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
+                <span className="text-[var(--text-secondary)]">Educador:</span>{' '}
+                <strong className="text-[var(--text-primary)]">{selectedEducador}</strong>
+              </div>
+              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
+                <span className="text-[var(--text-secondary)]">Sala:</span>{' '}
+                <strong className="text-[var(--text-primary)]">{selectedSala}</strong>
+              </div>
+              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
+                <span className="text-[var(--text-secondary)]">Financeiro:</span>{' '}
+                <strong className="text-[var(--text-primary)]">{selectedFinancialStatus}</strong>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleResetStudentFilters}
+              className="btn-press mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-3 py-2 text-xs font-semibold text-white"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Restaurar Filtros de Alunos</span>
+            </button>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <h4 className="typo-subtitle font-bold text-[var(--text-primary)]">
+              Resumo do Kanban NPS
+            </h4>
+            <p className="typo-meta mt-1 text-[var(--text-secondary)]">
+              Exibindo {npsFilteredCards.length} de {synchronizedNpsStudentCards.length} convites NPS sincronizados ({npsReferenceYear}).
+            </p>
+            <button
+              type="button"
+              onClick={handleResetNpsFilters}
+              className="btn-press mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-2 text-xs font-semibold text-[var(--text-primary)]"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Restaurar Filtros NPS</span>
+            </button>
+          </div>
+        </div>
+      </SlideOverDrawer>
+      </div>
+    </ToastProvider>
   );
 }

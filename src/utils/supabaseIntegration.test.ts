@@ -88,10 +88,18 @@ test('SUPABASE-04: Autenticação de usuários autorizados (Admin e Colaborador 
   assert.equal(schoolLogin.session?.role, 'ESCOLA');
   assert.equal(schoolLogin.session?.schoolId, 'school-1875');
 
-  // Login do Administrador Geral
-  const adminLogin = await authenticateUserInSupabase('admin', 'Alisson@2026');
-  assert.equal(adminLogin.ok, true, 'Login admin deve autenticar com sucesso');
+  // Login do Administrador Geral único (admin / 2ab@283)
+  const adminLogin = await authenticateUserInSupabase('admin', '2ab@283');
+  assert.equal(adminLogin.ok, true, 'Login admin com senha 2ab@283 deve autenticar com sucesso');
   assert.equal(adminLogin.session?.role, 'ADMIN');
+
+  // Senhas antigas ou senhas incorretas devem falhar estritamente
+  const oldPassLogin = await authenticateUserInSupabase('admin', 'Alisson@2026');
+  assert.equal(oldPassLogin.ok, false, 'Senha antiga não deve ser aceita');
+
+  // Aliases antigos não devem autenticar como ADM
+  const aliasLogin = await authenticateUserInSupabase('alisson', '2ab@283');
+  assert.equal(aliasLogin.ok, false, 'Alias alisson não deve ser aceito');
 
   // Login de usuário não cadastrado deve falhar
   const unknownLogin = await authenticateUserInSupabase('usuario.inexistente', ' Qualquer123');

@@ -40,32 +40,114 @@ const procEnv =
 // Chave publicável oficial fornecida para o projeto Supabase
 const DEFAULT_SUPABASE_PUBLISHABLE_KEY =
   'sb_publishable_qs0jbtlopLTJG1cbZD8AFQ_kRR37HKM';
+const DEFAULT_ACTIVE_SUPABASE_URL = 'https://dwarcjrpwubtveilwkyi.supabase.co';
 
-// URL oficial do projeto Supabase (https://dwarcjrpwubtveilwkyi.supabase.co)
-const configuredSupabaseUrl = (
+// URL oficial do projeto Supabase (normaliza eventual sufixo .supabase.com e migra host antigo descontinuado)
+const rawSupabaseUrl = (
   metaEnv.VITE_SUPABASE_URL ||
   procEnv.VITE_SUPABASE_URL ||
   procEnv.SUPABASE_URL ||
-  'https://dwarcjrpwubtveilwkyi.supabase.co'
+  DEFAULT_ACTIVE_SUPABASE_URL
 ).trim();
 
-const configuredAnonKey = (
+const isLegacyDecommissionedProject = /hkonvuytinqlakerpara/i.test(rawSupabaseUrl);
+
+const configuredSupabaseUrl = isLegacyDecommissionedProject
+  ? DEFAULT_ACTIVE_SUPABASE_URL
+  : rawSupabaseUrl.replace(/\.supabase\.com(\/|$)/i, '.supabase.co$1');
+
+const rawAnonKey = (
   metaEnv.VITE_SUPABASE_ANON_KEY ||
   procEnv.VITE_SUPABASE_ANON_KEY ||
   procEnv.SUPABASE_ANON_KEY ||
   DEFAULT_SUPABASE_PUBLISHABLE_KEY
 ).trim();
 
+const configuredAnonKey =
+  isLegacyDecommissionedProject || !rawAnonKey
+    ? DEFAULT_SUPABASE_PUBLISHABLE_KEY
+    : rawAnonKey;
+
 // REGRA DE SEGURANÇA CRÍTICA (ETAPA 4 / ETAPA 5):
 // A chave secreta (service_role / sb_secret_...) NUNCA é incluída nem referenciada no código do navegador.
 // Ela é lida exclusivamente de process.env.SUPABASE_SERVICE_ROLE_KEY quando em execução no servidor Node.js.
 const serverOnlyServiceRoleKey =
-  typeof window === 'undefined'
+  typeof window === 'undefined' && !isLegacyDecommissionedProject
     ? (procEnv.SUPABASE_SERVICE_ROLE_KEY || '').trim()
     : '';
 
 export const supabaseUrl = configuredSupabaseUrl;
 export const supabaseAnonKey = configuredAnonKey;
+
+let isSupabaseNetworkUnreachable = false;
+let initialConnectivityVerified = false;
+let inFlightConnectivityProbe: Promise<boolean> | null = null;
+
+function createOfflineEmptySupabaseResponse(): Response {
+  return new Response(JSON.stringify([]), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', 'Content-Range': '0-0/0' },
+  });
+}
+
+const resilientSupabaseFetch: typeof fetch = async (input, init) => {
+  if (isSupabaseNetworkUnreachable) {
+    return createOfflineEmptySupabaseResponse();
+  }
+
+  const reqUrl =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
+
+  // No navegador (chave publicável), tabelas confidenciais (users, audit_logs, lgpd_requests)
+  // são protegidas por RLS (bloqueadas para anon) e operadas via rotas /api/* do servidor.
+  if (
+    typeof window !== 'undefined' &&
+    /\/rest\/v1\/(users|audit_logs|lgpd_requests)(\?|$|\/)/i.test(reqUrl)
+  ) {
+    return createOfflineEmptySupabaseResponse();
+  }
+
+  // Serializa a primeira verificação de conectividade para evitar múltiplas falhas paralelas em Promise.all
+  if (!initialConnectivityVerified) {
+    if (!inFlightConnectivityProbe) {
+      inFlightConnectivityProbe = (async () => {
+        try {
+          const probeRes = await fetch(
+            `${configuredSupabaseUrl}/rest/v1/schools?select=id&limit=1`,
+            {
+              method: 'HEAD',
+              headers: { apikey: configuredAnonKey },
+            }
+          );
+          if (probeRes.ok || probeRes.status < 500) {
+            initialConnectivityVerified = true;
+            return true;
+          }
+          isSupabaseNetworkUnreachable = true;
+          return false;
+        } catch {
+          isSupabaseNetworkUnreachable = true;
+          return false;
+        }
+      })();
+    }
+    const reachable = await inFlightConnectivityProbe;
+    if (!reachable) {
+      return createOfflineEmptySupabaseResponse();
+    }
+  }
+
+  try {
+    return await fetch(input, init);
+  } catch {
+    isSupabaseNetworkUnreachable = true;
+    return createOfflineEmptySupabaseResponse();
+  }
+};
 
 /**
  * Cliente público/autenticado do Supabase (utiliza exclusivamente a chave publicável + sessão do Supabase Auth).
@@ -76,6 +158,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: typeof window !== 'undefined',
     autoRefreshToken: typeof window !== 'undefined',
     detectSessionInUrl: typeof window !== 'undefined',
+  },
+  global: {
+    fetch: resilientSupabaseFetch,
   },
 });
 
@@ -90,6 +175,9 @@ export const supabaseAdmin =
           persistSession: false,
           autoRefreshToken: false,
         },
+        global: {
+          fetch: resilientSupabaseFetch,
+        },
       })
     : supabase;
 
@@ -101,7 +189,7 @@ export function resolveSupabaseAuthEmail(loginRaw: string): string {
   const clean = normalizeLoginIdentifier(loginRaw);
   if (!clean) return '';
   if (clean.includes('@')) return clean;
-  if (clean === 'admin' || clean === 'alisson') {
+  if (clean === 'admin') {
     return 'admin@microlins.com.br';
   }
   return `${clean}@microlins.com.br`;
@@ -1661,10 +1749,7 @@ export async function authenticateUserInSupabase(
   senha: string
 ): Promise<AuthLoginResult> {
   const normLogin = normalizeLoginIdentifier(login);
-  const lookupLogin =
-    normLogin === 'admin@microlins.com.br' || normLogin === 'alisson'
-      ? 'admin'
-      : normLogin;
+  const lookupLogin = normLogin;
   const authEmail = resolveSupabaseAuthEmail(lookupLogin);
 
   // 1. Tentativa oficial via Supabase Auth (signInWithPassword)
@@ -1716,6 +1801,14 @@ export async function authenticateUserInSupabase(
         meta.role === 'ADMIN' ||
         lookupLogin === 'admin';
 
+      if (isAdmin && lookupLogin !== 'admin') {
+        await supabase.auth.signOut();
+        return {
+          ok: false,
+          error: 'Acesso negado: o perfil de administrador requer estritamente o login "admin".',
+        };
+      }
+
       const session: AuthSession = {
         role: isAdmin ? 'ADMIN' : 'ESCOLA',
         login: String(profileRow?.login || lookupLogin),
@@ -1762,17 +1855,14 @@ export async function authenticateUserInSupabase(
       const isAdmin =
         supaUser.role === 'ADMIN' ||
         supaUser.id === 'admin-master' ||
-        lookupLogin === 'admin' ||
-        normLogin === 'alisson';
+        lookupLogin === 'admin';
       const storedHash = String(supaUser.password_hash || supaUser.senha || '');
       const matchesSupaHash =
         Boolean(storedHash) && verifyPasswordArgon2id(senha, storedHash);
       const matchesDefaultAdminHash =
         isAdmin &&
-        ((Boolean(DEFAULT_ADMIN_CREDENTIALS.senha) &&
-          verifyPasswordArgon2id(senha, DEFAULT_ADMIN_CREDENTIALS.senha)) ||
-          (Boolean(DEFAULT_ADMIN_CREDENTIALS.alternateHash) &&
-            verifyPasswordArgon2id(senha, DEFAULT_ADMIN_CREDENTIALS.alternateHash)));
+        Boolean(DEFAULT_ADMIN_CREDENTIALS.senha) &&
+        verifyPasswordArgon2id(senha, DEFAULT_ADMIN_CREDENTIALS.senha);
 
       if (matchesSupaHash || matchesDefaultAdminHash) {
         if (supaUser.ativo === false) {

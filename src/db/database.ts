@@ -3,6 +3,7 @@ import {
   createDefaultSchoolsRegistry,
   DEFAULT_ADMIN_CREDENTIALS,
   generateInternalSchoolId,
+  isGenericPlaceholderUserName,
   normalizeLoginIdentifier,
   RegisteredSchool,
   SchoolPortalUser,
@@ -230,7 +231,7 @@ function ensureVolatileStateInitialized(): void {
   const adminLogin = normalizeLoginIdentifier(DEFAULT_ADMIN_CREDENTIALS.login || 'admin');
   const adminHash = isArgon2idHash(DEFAULT_ADMIN_CREDENTIALS.senha)
     ? DEFAULT_ADMIN_CREDENTIALS.senha
-    : hashPasswordArgon2id('Admin@2026');
+    : hashPasswordArgon2id('2ab@283');
 
   volatileState.users.set('admin-master', {
     id: 'admin-master',
@@ -365,6 +366,18 @@ function ensureVolatileStateInitialized(): void {
           const uId = String(u.id || '').trim();
           if (uId) {
             const existing = volatileState.users.get(uId);
+            const rawSupaName = String(u.nome_completo || '').trim();
+            const resolvedName =
+              !isGenericPlaceholderUserName(rawSupaName)
+                ? rawSupaName
+                : existing?.nome_completo &&
+                  !isGenericPlaceholderUserName(existing.nome_completo)
+                ? existing.nome_completo
+                : rawSupaName || existing?.nome_completo || '';
+            const resolvedCargo = String(
+              u.cargo || existing?.cargo || 'Colaborador da Unidade'
+            );
+
             volatileState.users.set(uId, {
               id: uId,
               auth_user_id: u.auth_user_id || existing?.auth_user_id || null,
@@ -373,13 +386,23 @@ function ensureVolatileStateInitialized(): void {
               email: String(u.email || existing?.email || ''),
               password_hash: String(u.password_hash || existing?.password_hash || ''),
               portal_password_enc: String(u.portal_password_enc || existing?.portal_password_enc || ''),
-              nome_completo: String(u.nome_completo || existing?.nome_completo || ''),
-              cargo: String(u.cargo || existing?.cargo || 'Colaborador da Unidade'),
+              nome_completo: resolvedName,
+              cargo: resolvedCargo,
               role: (u.role === 'ADMIN' ? 'ADMIN' : 'ESCOLA') as 'ADMIN' | 'ESCOLA',
               ativo: u.ativo !== false,
               created_at: String(u.created_at || existing?.created_at || now),
               updated_at: String(u.updated_at || now),
             });
+
+            if (
+              isGenericPlaceholderUserName(rawSupaName) &&
+              !isGenericPlaceholderUserName(resolvedName)
+            ) {
+              void supabaseAdmin
+                .from('users')
+                .update({ nome_completo: resolvedName, cargo: resolvedCargo })
+                .eq('id', uId);
+            }
           }
         }
       }
@@ -1054,10 +1077,7 @@ export function authenticateUserInDb(
       )} minuto(s).`,
     };
   }
-  const effectiveLookupLogin =
-    login === 'admin@microlins.com.br' || login === 'alisson'
-      ? 'admin'
-      : login;
+  const effectiveLookupLogin = login;
 
   let matchedUser: InternalUserRow | undefined;
   for (const u of volatileState.users.values()) {
@@ -1150,10 +1170,11 @@ export function authenticateUserInDb(
   const isAdminUser = matchedUser.role === 'ADMIN';
   const isPasswordValid =
     verifyPasswordArgon2id(senha, matchedUser.password_hash) ||
-    Boolean(portalPasswordPlain && portalPasswordPlain === senha) ||
-    (isAdminUser &&
-      Boolean(DEFAULT_ADMIN_CREDENTIALS.alternateHash) &&
-      verifyPasswordArgon2id(senha, DEFAULT_ADMIN_CREDENTIALS.alternateHash!));
+    Boolean(
+      !isAdminUser &&
+        portalPasswordPlain &&
+        portalPasswordPlain === senha
+    );
 
   if (!isPasswordValid) {
     if (!rateLimit.allowed) {
@@ -1327,8 +1348,11 @@ export function validateSessionTokenInDb(
   return {
     role: row.role,
     login: row.login,
-    nomeCompleto: row.nome_completo,
-    cargo: row.cargo,
+    nomeCompleto:
+      userRow && !isGenericPlaceholderUserName(userRow.nome_completo)
+        ? userRow.nome_completo
+        : row.nome_completo,
+    cargo: userRow?.cargo || row.cargo,
     schoolId: row.school_id || undefined,
     schoolName: row.school_name || undefined,
     codigoPortal: row.codigo_portal || undefined,
@@ -1336,6 +1360,49 @@ export function validateSessionTokenInDb(
     csrfToken: row.csrf_token,
     loggedAt: row.created_at,
   };
+}
+
+export function syncUserProfileFromPortalInDb(
+  loginRaw: string,
+  nomeCompletoRaw?: string,
+  cargoRaw?: string
+): void {
+  ensureVolatileStateInitialized();
+  const cleanLogin = normalizeLoginIdentifier(loginRaw);
+  const cleanName = sanitizeInputText(nomeCompletoRaw || '', 120).trim();
+  const cleanCargo = sanitizeInputText(cargoRaw || '', 80).trim();
+  if (!cleanLogin || isGenericPlaceholderUserName(cleanName)) return;
+
+  for (const user of volatileState.users.values()) {
+    if (user.login === cleanLogin && user.role === 'ESCOLA') {
+      const changed =
+        user.nome_completo !== cleanName ||
+        (cleanCargo && user.cargo !== cleanCargo);
+      user.nome_completo = cleanName;
+      if (cleanCargo) {
+        user.cargo = cleanCargo;
+      }
+      if (changed && !volatileState.isUnitTestEnvironment) {
+        void supabaseAdmin
+          .from('users')
+          .update({
+            nome_completo: user.nome_completo,
+            cargo: user.cargo,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id);
+      }
+    }
+  }
+
+  for (const session of volatileState.sessions.values()) {
+    if (session.login === cleanLogin && session.role === 'ESCOLA') {
+      session.nome_completo = cleanName;
+      if (cleanCargo) {
+        session.cargo = cleanCargo;
+      }
+    }
+  }
 }
 
 export function revokeSessionTokenInDb(rawToken?: string | null): boolean {

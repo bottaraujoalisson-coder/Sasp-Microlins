@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { HelpCircle, X } from 'lucide-react';
 
 export interface IndicatorHelpDefinition {
@@ -432,68 +433,75 @@ export const IndicatorHelpPopover: React.FC<IndicatorHelpPopoverProps> = ({
         <HelpCircle className="h-3.5 w-3.5" />
       </button>
 
-      {open && (
-        <div
-          role="dialog"
-          aria-label={definition.titulo}
-          data-testid={`indicator-help-popover-${indicatorId}`}
-          className={`absolute top-full z-50 mt-2 w-80 sm:w-96 rounded-xl border border-slate-200 bg-white p-4 text-left shadow-2xl ring-1 ring-slate-900/5 ${alignClass}`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="mb-2.5 flex items-start justify-between gap-2 border-b border-slate-100 pb-2">
-            <div>
-              <span className="inline-block rounded bg-[#004A8D]/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#004A8D]">
-                Entenda o Indicador
-              </span>
-              <h4 className="mt-1 text-xs font-extrabold text-slate-900">
-                {definition.titulo}
-              </h4>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 4 }}
+            transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+            role="dialog"
+            aria-label={definition.titulo}
+            data-testid={`indicator-help-popover-${indicatorId}`}
+            className={`absolute top-full z-50 mt-2 w-80 sm:w-96 glass-modal p-4 text-left ${alignClass}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-2.5 flex items-start justify-between gap-2 border-b border-[var(--border-color)] pb-2">
+              <div>
+                <span className="inline-block rounded-md bg-[#2563EB]/12 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-primary)]">
+                  Entenda o Indicador
+                </span>
+                <h4 className="mt-1 text-xs font-extrabold text-[var(--text-primary)]">
+                  {definition.titulo}
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpen(false);
+                }}
+                className="rounded-lg p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+                aria-label="Fechar explicação"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-              }}
-              className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-              aria-label="Fechar explicação"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
 
-          <div className="space-y-2 text-[11px] leading-relaxed text-slate-600 max-h-80 overflow-y-auto pr-1">
-            <div>
-              <p className="font-bold text-slate-800">1. O que representa:</p>
-              <p>{definition.oQueRepresenta}</p>
-            </div>
-            <div>
-              <p className="font-bold text-slate-800">2. Dados utilizados:</p>
-              <p>{definition.dadosUtilizados}</p>
-            </div>
-            <div>
-              <p className="font-bold text-slate-800">3. Regra de negócio / Fórmula:</p>
-              <p className="rounded bg-slate-50 px-2 py-1 font-medium text-slate-700 border border-slate-200/60">
-                {definition.regraNegocioFormula}
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded bg-slate-50/70 p-1.5 border border-slate-100">
-                <p className="font-bold text-slate-800">4. Período:</p>
-                <p className="text-[10.5px]">{definition.periodoConsiderado}</p>
+            <div className="space-y-2 text-[11.5px] leading-relaxed text-[var(--text-secondary)] max-h-80 overflow-y-auto pr-1">
+              <div>
+                <p className="font-bold text-[var(--text-primary)]">1. O que representa:</p>
+                <p>{definition.oQueRepresenta}</p>
               </div>
-              <div className="rounded bg-slate-50/70 p-1.5 border border-slate-100">
-                <p className="font-bold text-slate-800">5. Filtros:</p>
-                <p className="text-[10.5px]">{definition.filtrosQueInfluenciam}</p>
+              <div>
+                <p className="font-bold text-[var(--text-primary)]">2. Dados utilizados:</p>
+                <p>{definition.dadosUtilizados}</p>
+              </div>
+              <div>
+                <p className="font-bold text-[var(--text-primary)]">3. Regra de negócio / Fórmula:</p>
+                <p className="rounded-lg bg-[var(--bg-secondary)] px-2.5 py-1.5 font-medium text-[var(--text-primary)] border border-[var(--border-color)]">
+                  {definition.regraNegocioFormula}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-lg bg-[var(--bg-secondary)]/80 p-2 border border-[var(--border-color)]">
+                  <p className="font-bold text-[var(--text-primary)]">4. Período:</p>
+                  <p className="text-[11px]">{definition.periodoConsiderado}</p>
+                </div>
+                <div className="rounded-lg bg-[var(--bg-secondary)]/80 p-2 border border-[var(--border-color)]">
+                  <p className="font-bold text-[var(--text-primary)]">5. Filtros:</p>
+                  <p className="text-[11px]">{definition.filtrosQueInfluenciam}</p>
+                </div>
+              </div>
+              <div>
+                <p className="font-bold text-[var(--text-primary)]">6. Como interpretar:</p>
+                <p>{definition.comoInterpretar}</p>
               </div>
             </div>
-            <div>
-              <p className="font-bold text-slate-800">6. Como interpretar:</p>
-              <p>{definition.comoInterpretar}</p>
-            </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
+

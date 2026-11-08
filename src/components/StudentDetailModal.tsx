@@ -1,10 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import {
   AlertTriangle,
   BookOpen,
   BookX,
+  Camera,
   Check,
   CheckCircle2,
+  ClipboardList,
   Clock,
   Copy,
   CreditCard,
@@ -27,12 +30,15 @@ import {
   formatModuleDisplay,
   isNotStartedAttendanceStatus,
 } from '../utils/performanceAnalytics';
+import { saveStudentRegisteredPhoto, SmartAvatar, useToast } from './uiSystem';
 
 interface StudentDetailModalProps {
   student: EvaluatedStudentRecord | null;
   studentHistory: EvaluatedStudentRecord[];
   onClose: () => void;
-  onOpenPortalHub?: (subTab?: 'CARTEIRINHA' | 'BOLETIM' | 'DECLARACAO') => void;
+  onOpenPortalHub?: (
+    subTab?: 'CARTEIRINHA' | 'BOLETIM' | 'ACOMPANHAMENTO' | 'DECLARACAO'
+  ) => void;
 }
 
 export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
@@ -41,7 +47,9 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
   onClose,
   onOpenPortalHub,
 }) => {
+  const { toast } = useToast();
   const [copiedLink, setCopiedLink] = useState(false);
+  const modalPhotoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!student) return;
@@ -75,6 +83,11 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
     try {
       await navigator.clipboard.writeText(student.linkAcessoDireto);
       setCopiedLink(true);
+      toast({
+        type: 'success',
+        title: 'Link de acesso copiado',
+        message: `Link direto da aula de ${student.nomeCompleto} copiado.`,
+      });
       setTimeout(() => setCopiedLink(false), 2000);
     } catch {
       // Fallback silent
@@ -91,44 +104,98 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
     (student.professor || student.educador || '').trim() || 'Não atribuído';
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-end bg-slate-900/55 backdrop-blur-xs transition-opacity duration-200"
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="fixed inset-0 z-50 flex items-center justify-end bg-slate-950/60 backdrop-blur-xs"
       role="dialog"
       aria-modal="true"
       aria-labelledby="student-detail-title"
       onClick={onClose}
     >
-      <div
-        className="flex h-full w-full max-w-xl flex-col overflow-hidden border-l border-slate-200 bg-white shadow-2xl transition-transform duration-200 dark:border-slate-800 dark:bg-slate-900"
+      <motion.div
+        initial={{ x: '100%' }}
+        animate={{ x: 0 }}
+        exit={{ x: '100%' }}
+        transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
+        className="glass-modal flex h-full w-full max-w-xl flex-col overflow-hidden border-l border-[var(--border-color)] bg-[var(--surface-elevated)] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Cabeçalho */}
-        <div className="flex shrink-0 items-start justify-between border-b border-[#003A70] bg-[#004A8D] px-5 py-4 text-white">
-          <div className="min-w-0 flex-1 pr-3">
-            <div className="typo-meta flex flex-wrap items-center gap-2 text-sky-100 tabular-nums">
-              <span className="font-semibold text-white">
-                Contrato #{student.contrato}
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>{student.diaSemana}</span>
-              <span aria-hidden="true">·</span>
-              <span>{student.turno}</span>
+        <div className="flex shrink-0 items-start justify-between border-b border-blue-800 bg-gradient-to-r from-[#0F172A] via-[#1E3A8A] to-[#2563EB] px-5 py-4 text-white">
+          <div className="flex min-w-0 flex-1 items-center gap-3.5 pr-3">
+            <div className="relative group/avatar shrink-0">
+              <SmartAvatar
+                name={student.nomeCompleto}
+                contrato={student.contrato}
+                size="lg"
+                statusDot={
+                  student.attendanceStatus === 'Presença'
+                    ? 'success'
+                    : student.attendanceStatus === 'Falta'
+                    ? 'error'
+                    : 'neutral'
+                }
+              />
+              <input
+                ref={modalPhotoInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    if (typeof reader.result === 'string') {
+                      saveStudentRegisteredPhoto(student.contrato, reader.result);
+                      toast({
+                        type: 'success',
+                        title: 'Foto cadastral atualizada',
+                        description: `A foto de ${student.nomeCompleto} foi vinculada ao cadastro e sincronizada em todos os documentos.`,
+                      });
+                    }
+                  };
+                  reader.readAsDataURL(file);
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => modalPhotoInputRef.current?.click()}
+                title="Atualizar foto cadastral do aluno (sincroniza com Ficha Individual, Carteirinha e Acompanhamento)"
+                className="absolute -top-1 -left-1 flex h-6 w-6 items-center justify-center rounded-full border border-white/40 bg-slate-900/80 text-white shadow-xs transition-transform hover:scale-105 cursor-pointer"
+              >
+                <Camera className="h-3 w-3" />
+              </button>
             </div>
-            <h2
-              id="student-detail-title"
-              className="typo-title-main mt-1 truncate text-white"
-            >
-              {student.nomeCompleto}
-            </h2>
-            <p className="typo-meta mt-0.5 text-sky-100/90">
-              {student.formacao || 'Formação Profissional Microlins'}
-            </p>
+            <div className="min-w-0 flex-1">
+              <div className="typo-meta flex flex-wrap items-center gap-2 font-mono text-sky-100 tabular-nums">
+                <span className="font-semibold text-white">
+                  Contrato #{student.contrato}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span>{student.diaSemana}</span>
+                <span aria-hidden="true">·</span>
+                <span>{student.turno}</span>
+              </div>
+              <h2
+                id="student-detail-title"
+                className="typo-title-section mt-0.5 truncate text-white"
+              >
+                {student.nomeCompleto}
+              </h2>
+              <p className="typo-meta mt-0.5 truncate text-sky-100/90">
+                {student.formacao || 'Formação Profissional Microlins'}
+              </p>
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Fechar detalhes do aluno"
-            className="rounded-lg p-1.5 text-sky-100 transition-colors hover:bg-white/10 hover:text-white"
+            className="btn-press rounded-xl p-1.5 text-sky-100 transition-colors hover:bg-white/15 hover:text-white cursor-pointer"
           >
             <X className="h-5 w-5" />
           </button>
@@ -174,7 +241,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                     </div>
                   </div>
                 </div>
-                <span className="typo-badge rounded border border-purple-200 bg-white px-2 py-0.5 text-purple-800 dark:border-purple-700 dark:bg-purple-900/70 dark:text-purple-200">
+                <span className="typo-badge rounded-md border border-purple-200 bg-white px-2 py-0.5 text-purple-800 dark:border-purple-700 dark:bg-purple-900/70 dark:text-purple-200">
                   {student.npsOrigemFormatada || student.npsInvitation.origem}
                 </span>
               </div>
@@ -206,7 +273,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                   ? 'border-emerald-200/80 bg-emerald-50/60 text-emerald-950 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-100'
                   : student.attendanceStatus === 'Falta'
                   ? 'border-rose-200/80 bg-rose-50/60 text-rose-950 dark:border-rose-800/70 dark:bg-rose-950/50 dark:text-rose-100'
-                  : 'border-slate-200 bg-slate-50/90 text-slate-900 dark:border-slate-800 dark:bg-slate-800/70 dark:text-slate-100'
+                  : 'border-[var(--border-color)] bg-[var(--bg-secondary)]/80 text-[var(--text-primary)]'
               }`}
             >
               <div className="flex items-center gap-2.5">
@@ -233,7 +300,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
             <div
               className={`flex items-center justify-between rounded-xl border p-3.5 ${
                 frequenciaHistorico === null
-                  ? 'border-slate-200 bg-slate-50/90 text-slate-800 dark:border-slate-800 dark:bg-slate-800/70 dark:text-slate-200'
+                  ? 'border-[var(--border-color)] bg-[var(--bg-secondary)]/80 text-[var(--text-primary)]'
                   : isFrequenciaGreen
                   ? 'border-emerald-200/85 bg-emerald-50/60 text-emerald-950 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-100'
                   : 'border-rose-200/85 bg-rose-50/60 text-rose-950 dark:border-rose-800/70 dark:bg-rose-950/50 dark:text-rose-100'
@@ -254,7 +321,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                     Frequência
                   </div>
                   <div
-                    className={`typo-title-section tabular-nums ${
+                    className={`typo-title-section font-mono tabular-nums ${
                       frequenciaHistorico === null
                         ? 'text-slate-700 dark:text-slate-300'
                         : isFrequenciaGreen
@@ -268,7 +335,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                   </div>
                 </div>
               </div>
-              <span className="typo-meta opacity-75 tabular-nums">
+              <span className="typo-meta font-mono opacity-75 tabular-nums">
                 {presencasHistorico}P / {faltasHistorico}F
               </span>
             </div>
@@ -276,59 +343,59 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
 
           {/* Resumo Acadêmico do Aluno */}
           <div className="space-y-2">
-            <h3 className="typo-title-section flex items-center gap-1.5 text-slate-800 dark:text-slate-200">
-              <GraduationCap className="h-4 w-4 text-[#004A8D] dark:text-sky-400" />
+            <h3 className="typo-title-section flex items-center gap-1.5 text-[var(--text-primary)]">
+              <GraduationCap className="h-4 w-4 text-[var(--color-primary)]" />
               Resumo do Aluno
             </h3>
-            <div className="typo-card-body grid grid-cols-2 gap-3.5 rounded-xl border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-3 dark:border-slate-800 dark:bg-slate-800/50">
+            <div className="typo-card-body surface-solid grid grid-cols-2 gap-3.5 rounded-xl border border-[var(--border-color)] p-4 sm:grid-cols-3">
               <div className="sm:col-span-2">
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Módulo Atual
                 </span>
-                <p className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">
+                <p className="mt-0.5 font-semibold text-[var(--text-primary)]">
                   {moduloDisplay}
                 </p>
               </div>
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Aula Atual
                 </span>
-                <p className="mt-0.5 font-semibold text-slate-900 tabular-nums dark:text-slate-100">
+                <p className="mt-0.5 font-mono font-semibold text-[var(--text-primary)] tabular-nums">
                   {student.aulaInfo || student.aulaAtualLabel}
                 </p>
               </div>
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Professor Responsável
                 </span>
                 <p
                   data-testid="student-modal-professor"
-                  className="mt-0.5 flex items-center gap-1 font-semibold text-[#004A8D] dark:text-sky-300"
+                  className="mt-0.5 flex items-center gap-1 font-semibold text-[var(--color-primary)]"
                 >
                   <UserCheck className="h-3.5 w-3.5 shrink-0" />
                   <span>{professorDisplay}</span>
                 </p>
               </div>
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Sala
                 </span>
-                <p className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">
+                <p className="mt-0.5 font-semibold text-[var(--text-primary)]">
                   {salaDisplay}
                 </p>
               </div>
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Categoria do Curso
                 </span>
-                <p className="mt-0.5 font-semibold text-[#004A8D] dark:text-sky-300">
+                <p className="mt-0.5 font-semibold text-[var(--color-primary)]">
                   {student.categoriaCurso === 'INGLÊS'
                     ? 'Inglês'
                     : 'Profissionalizante'}
                 </p>
               </div>
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Apostila
                 </span>
                 <div className="mt-0.5 flex items-center gap-1.5">
@@ -354,7 +421,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                 </div>
               </div>
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Financeiro
                 </span>
                 <p
@@ -369,12 +436,12 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                 </p>
               </div>
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Última Nota
                 </span>
                 <p
                   data-testid="student-modal-nota-contexto"
-                  className="mt-0.5 font-semibold text-slate-900 tabular-nums dark:text-slate-100"
+                  className="mt-0.5 font-mono font-semibold text-[var(--text-primary)] tabular-nums"
                 >
                   {student.notaContextoLabel}
                 </p>
@@ -385,11 +452,11 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
           {/* Histórico de Agendamentos do Contrato */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="typo-title-section flex items-center gap-1.5 text-slate-800 dark:text-slate-200">
-                <History className="h-4 w-4 text-[#004A8D] dark:text-sky-400" />
+              <h3 className="typo-title-section flex items-center gap-1.5 text-[var(--text-primary)]">
+                <History className="h-4 w-4 text-[var(--color-primary)]" />
                 Agendamentos (#{student.contrato})
               </h3>
-              <div className="typo-meta flex items-center gap-2 font-semibold tabular-nums">
+              <div className="typo-meta flex items-center gap-2 font-mono font-semibold tabular-nums">
                 <span className="text-emerald-700 dark:text-emerald-400">
                   {presencasHistorico}P
                 </span>
@@ -400,7 +467,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                 {naoIniciadosHistorico > 0 && (
                   <>
                     <span className="text-slate-300 dark:text-slate-700">·</span>
-                    <span className="text-slate-600 dark:text-slate-400">
+                    <span className="text-[var(--text-secondary)]">
                       {naoIniciadosHistorico} Não inic.
                     </span>
                   </>
@@ -408,7 +475,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
               </div>
             </div>
 
-            <div className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+            <div className="surface-solid divide-y divide-[var(--border-color)] overflow-hidden rounded-xl border border-[var(--border-color)]">
               {studentHistory.map((item) => {
                 const isSelectedClass = item.id === student.id;
                 const itemSala = formatFullSalaName(item.sala);
@@ -417,19 +484,19 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                     key={item.id}
                     className={`flex items-center justify-between gap-3 px-3.5 py-2.5 ${
                       isSelectedClass
-                        ? 'bg-sky-50/45 dark:bg-sky-950/30'
-                        : 'bg-white dark:bg-slate-900'
+                        ? 'bg-blue-50/50 dark:bg-blue-950/30'
+                        : 'bg-[var(--surface-card)]'
                     }`}
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="typo-card-body flex items-center gap-2 font-semibold text-slate-900 tabular-nums dark:text-slate-100">
-                        <span>{item.horario}</span>
+                      <div className="typo-card-body flex items-center gap-2 font-semibold text-[var(--text-primary)] tabular-nums">
+                        <span className="font-mono">{item.horario}</span>
                         <span className="text-slate-300 dark:text-slate-600">·</span>
                         <span className="truncate">
                           {formatModuleDisplay(item.moduloAtual || item.curso)}
                         </span>
                       </div>
-                      <div className="typo-meta mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-slate-500 tabular-nums dark:text-slate-400">
+                      <div className="typo-meta mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[var(--text-secondary)] tabular-nums">
                         <span>{item.aulaInfo}</span>
                         <span>·</span>
                         <span>{itemSala}</span>
@@ -449,7 +516,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                     </div>
 
                     <span
-                      className={`typo-badge inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 ${
+                      className={`typo-badge inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 ${
                         item.attendanceStatus === 'Presença'
                           ? 'border-emerald-200/80 bg-emerald-50/90 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
                           : item.attendanceStatus === 'Falta'
@@ -467,24 +534,24 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
 
           {/* Contatos e Acesso à Aula */}
           <div className="space-y-2">
-            <h3 className="typo-title-section flex items-center gap-1.5 text-slate-800 dark:text-slate-200">
-              <Phone className="h-4 w-4 text-[#004A8D] dark:text-sky-400" />
+            <h3 className="typo-title-section flex items-center gap-1.5 text-[var(--text-primary)]">
+              <Phone className="h-4 w-4 text-[var(--color-primary)]" />
               Contatos e Acesso à Aula
             </h3>
-            <div className="typo-card-body grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2 dark:border-slate-800 dark:bg-slate-800/50">
+            <div className="typo-card-body surface-solid grid grid-cols-1 gap-3 rounded-xl border border-[var(--border-color)] p-4 sm:grid-cols-2">
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Telefone do Aluno
                 </span>
-                <p className="mt-0.5 font-semibold text-slate-900 tabular-nums dark:text-slate-100">
+                <p className="mt-0.5 font-mono font-semibold text-[var(--text-primary)] tabular-nums">
                   {student.telefoneAluno || 'Não informado'}
                 </p>
               </div>
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Responsável
                 </span>
-                <p className="mt-0.5 font-semibold text-slate-900 tabular-nums dark:text-slate-100">
+                <p className="mt-0.5 font-semibold text-[var(--text-primary)] tabular-nums">
                   {student.nomeResponsavel
                     ? `${student.nomeResponsavel}${
                         student.telefoneResponsavel
@@ -496,7 +563,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
               </div>
               <div className="sm:col-span-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="typo-meta text-slate-500 dark:text-slate-400">
+                  <span className="typo-meta text-[var(--text-secondary)]">
                     Acesso à Aula (Portal do Aluno)
                   </span>
                   <div className="flex items-center gap-1.5">
@@ -504,7 +571,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                       href={student.linkAcessoDireto}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="typo-btn inline-flex items-center gap-1 rounded border border-[#004A8D]/25 bg-[#004A8D]/10 px-2 py-0.5 text-[#004A8D] transition-colors hover:bg-[#004A8D] hover:text-white dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-300 dark:hover:bg-sky-600 dark:hover:text-white"
+                      className="btn-press typo-btn inline-flex items-center gap-1 rounded-lg border border-[var(--color-primary)]/25 bg-[var(--color-primary)]/10 px-2.5 py-1 text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)] hover:text-white"
                     >
                       <KeyRound className="h-3 w-3" />
                       <span>Acessar Aula</span>
@@ -513,7 +580,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                     <button
                       type="button"
                       onClick={handleCopyAuthLink}
-                      className="typo-btn inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-0.5 text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                      className="btn-press typo-btn inline-flex items-center gap-1 rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2.5 py-1 text-[var(--text-primary)] transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                     >
                       {copiedLink ? (
                         <>
@@ -537,25 +604,25 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
 
           {/* Ficha Individual do Aluno */}
           {onOpenPortalHub && (
-            <div className="space-y-2 rounded-xl border border-sky-200/80 bg-sky-50/60 p-3.5 dark:border-sky-800/70 dark:bg-sky-950/40">
+            <div className="space-y-2 rounded-xl border border-blue-200/80 bg-blue-50/50 p-3.5 dark:border-blue-800/70 dark:bg-blue-950/35">
               <div className="flex items-center justify-between">
-                <span className="typo-subtitle font-bold text-sky-950 dark:text-sky-200 flex items-center gap-1.5">
-                  <GraduationCap className="h-4 w-4 text-[#004A8D] dark:text-sky-400" />
+                <span className="typo-subtitle font-bold text-blue-950 dark:text-blue-200 flex items-center gap-1.5">
+                  <GraduationCap className="h-4 w-4 text-[var(--color-primary)]" />
                   Documentos do Aluno
                 </span>
-                <span className="text-[10px] font-semibold text-sky-700 uppercase tracking-wider dark:text-sky-300">
+                <span className="font-mono text-[10px] font-semibold text-blue-700 uppercase tracking-wider dark:text-blue-300">
                   #{student.contrato}
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 pt-1">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 pt-1">
                 <button
                   type="button"
                   data-testid="student-modal-open-carteirinha"
                   onClick={() => onOpenPortalHub('CARTEIRINHA')}
-                  className="flex flex-col items-center justify-center gap-1 rounded-lg border border-sky-300/80 bg-white p-2.5 text-center text-xs font-semibold text-sky-900 transition-colors hover:bg-sky-100/70 dark:border-sky-800 dark:bg-slate-900 dark:text-sky-200 dark:hover:bg-slate-800"
+                  className="btn-press hover-elevate flex flex-col items-center justify-center gap-1 rounded-xl border border-blue-200/80 bg-[var(--surface-card)] p-2.5 text-center text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-[var(--color-primary)] dark:border-blue-800/70 cursor-pointer"
                 >
-                  <CreditCard className="h-4 w-4 text-[#004A8D] dark:text-sky-400" />
+                  <CreditCard className="h-4 w-4 text-[var(--color-primary)]" />
                   <span>Carteirinha</span>
                 </button>
 
@@ -563,7 +630,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
                   type="button"
                   data-testid="student-modal-open-boletim"
                   onClick={() => onOpenPortalHub('BOLETIM')}
-                  className="flex flex-col items-center justify-center gap-1 rounded-lg border border-sky-300/80 bg-white p-2.5 text-center text-xs font-semibold text-sky-900 transition-colors hover:bg-sky-100/70 dark:border-sky-800 dark:bg-slate-900 dark:text-sky-200 dark:hover:bg-slate-800"
+                  className="btn-press hover-elevate flex flex-col items-center justify-center gap-1 rounded-xl border border-blue-200/80 bg-[var(--surface-card)] p-2.5 text-center text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-emerald-500 dark:border-blue-800/70 cursor-pointer"
                 >
                   <GraduationCap className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                   <span>Boletim</span>
@@ -571,9 +638,19 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
 
                 <button
                   type="button"
+                  data-testid="student-modal-open-acompanhamento"
+                  onClick={() => onOpenPortalHub('ACOMPANHAMENTO')}
+                  className="btn-press hover-elevate flex flex-col items-center justify-center gap-1 rounded-xl border border-blue-200/80 bg-[var(--surface-card)] p-2.5 text-center text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-purple-500 dark:border-blue-800/70 cursor-pointer"
+                >
+                  <ClipboardList className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+                  <span>Acompanhamento</span>
+                </button>
+
+                <button
+                  type="button"
                   data-testid="student-modal-open-declaracao"
                   onClick={() => onOpenPortalHub('DECLARACAO')}
-                  className="flex flex-col items-center justify-center gap-1 rounded-lg border border-sky-300/80 bg-white p-2.5 text-center text-xs font-semibold text-sky-900 transition-colors hover:bg-sky-100/70 dark:border-sky-800 dark:bg-slate-900 dark:text-sky-200 dark:hover:bg-slate-800"
+                  className="btn-press hover-elevate flex flex-col items-center justify-center gap-1 rounded-xl border border-blue-200/80 bg-[var(--surface-card)] p-2.5 text-center text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-amber-500 dark:border-blue-800/70 cursor-pointer"
                 >
                   <FileText className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                   <span>Declaração</span>
@@ -588,7 +665,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
               href={student.linkAcessoDireto}
               target="_blank"
               rel="noopener noreferrer"
-              className="typo-btn inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#004A8D]/30 bg-[#004A8D]/10 px-3 py-2.5 text-[#004A8D] transition-colors hover:bg-[#004A8D] hover:text-white dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-300 dark:hover:bg-sky-600 dark:hover:text-white"
+              className="btn-press typo-btn inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-3 py-2.5 text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)] hover:text-white"
             >
               <KeyRound className="h-4 w-4 shrink-0" />
               <span>Acessar Aula</span>
@@ -599,7 +676,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
               href={student.whatsappResponsavelContactUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="typo-btn inline-flex items-center justify-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50/80 px-3 py-2.5 text-sky-900 transition-colors hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900/60"
+              className="btn-press typo-btn inline-flex items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50/80 px-3 py-2.5 text-sky-900 transition-colors hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900/60"
             >
               <MessageCircle className="h-4 w-4 shrink-0 text-sky-700 dark:text-sky-400" />
               <span>Contatar Responsável</span>
@@ -610,7 +687,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
               href={student.whatsappAlunoLoginUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="typo-btn inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2.5 text-emerald-900 transition-colors hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
+              className="btn-press typo-btn inline-flex items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2.5 text-emerald-900 transition-colors hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
             >
               <MessageCircle className="h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
               <span>Enviar Aula</span>
@@ -620,16 +697,16 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
         </div>
 
         {/* Rodapé */}
-        <div className="flex shrink-0 items-center justify-end border-t border-slate-200 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex shrink-0 items-center justify-end border-t border-[var(--border-color)] bg-[var(--bg-secondary)]/80 px-5 py-3">
           <button
             type="button"
             onClick={onClose}
-            className="typo-btn rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            className="btn-press typo-btn rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] px-4 py-1.5 text-[var(--text-primary)] transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
             Fechar
           </button>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 };

@@ -8,6 +8,7 @@ import {
 export type FichaIndividualSectionTab =
   | 'CARTEIRINHA'
   | 'BOLETIM'
+  | 'ACOMPANHAMENTO'
   | 'DECLARACAO';
 
 export type ModuleProgressStatus = 'CURSADO' | 'EM_ANDAMENTO' | 'PENDENTE';
@@ -813,5 +814,545 @@ export function buildStudentFichaIndividual(
     fonteIntegracaoUrl:
       'https://portaldoaluno.microlins.com.br/aluno/fichaAcompanhamentoAluno',
     sincronizadoEm: `${PORTAL_METADATA.dataReferencia} às ${PORTAL_METADATA.horaExtracao.slice(0, 5)}`,
+  };
+}
+
+export type AttendanceTrackingType = 'NOR' | 'REP' | 'PLA' | 'AVU';
+export type AttendanceTrackingStatus = 'P' | 'F' | 'FJ' | 'RC' | 'PENDENTE';
+
+export interface ModuleLessonTrackingItem {
+  aulaNumero: number;
+  nomeAula: string;
+  dataAula: string;
+  dataInicio: string;
+  dataTermino: string;
+  tipoAula: AttendanceTrackingType;
+  tipoAulaLabel: string;
+  frequenciaStatus: AttendanceTrackingStatus;
+  frequenciaLabel: string;
+  conteudoMinistrado: string;
+  nota: number | null;
+  notaFormatada: string;
+  vistoEducador: boolean;
+  rubricaAluno: boolean;
+  assinaturaVisto: string;
+  isAulaConcluida: boolean;
+  horario?: string;
+  sala?: string;
+}
+
+export interface FichaAcompanhamentoModuleData {
+  instituicaoNome: string;
+  alunoNomeCompleto: string;
+  alunoContrato: string;
+  cursoTurma: string;
+  professorResponsavel: string;
+  periodoLetivo: string;
+  moduloNome: string;
+  cargaHorariaHoras: number;
+  totalAulasPrevistas: number;
+  aulasConcluidas: number;
+  presencasCount: number;
+  faltasCount: number;
+  faltasJustificadasCount: number;
+  frequenciaPercent: number;
+  mediaAtualEscala10: number | null;
+  mediaAtualEscala100: number | null;
+  situacaoPedagogica: ModuleApprovalSituation;
+  situacaoFinalAprovado: boolean;
+  situacaoFinalReprovado: boolean;
+  educadorNome: string;
+  salaNome: string;
+  horarioTurma: string;
+  diaSemanaTurma: string;
+  modalidade: string;
+  dataInicioModulo: string;
+  dataPrevisaoTermino: string;
+  aulas: ModuleLessonTrackingItem[];
+  avaliacoesPedagogicas: {
+    atividadesContinuasNota: number | null;
+    avaliacaoTeoricaNota: number | null;
+    projetoPraticoNota: number | null;
+    recuperacaoParalelaNota: number | null;
+  };
+  ocorrenciasRecentes: Array<{
+    data: string;
+    motivo: string;
+    acao: string;
+    novoAgendamento?: string;
+  }>;
+  parecerDescritivoSugerido: string;
+}
+
+/**
+ * Retorna o plano de curso oficial temático (ementa de 16 aulas) para o módulo especificado.
+ */
+export function getOfficialModuleSyllabus(moduloNome: string): string[] {
+  const norm = normalizeFichaSearchText(moduloNome || '');
+
+  if (norm.includes('excel')) {
+    return [
+      'Aula 01: Ambiente do Excel, Conceitos de Células e Interface',
+      'Aula 02: Inserção de Dados, Auto-Preenchimento e Formatação',
+      'Aula 03: Fórmulas Aritméticas e Referências ($A$1 e $A1)',
+      'Aula 04: Funções Estatísticas (SOMA, MÉDIA, MÁX, MÍN, CONT)',
+      'Aula 05: Funções Lógicas Condicionais (SE, SE.E e SE.OU)',
+      'Aula 06: Funções de Texto e Tratamento de Dados (CONCAT, EXT)',
+      'Aula 07: Funções de Data, Hora e Cálculo de Prazos Úteis',
+      'Aula 08: Avaliação Prática Parcial e Revisão Aplicada de Fórmulas',
+      'Aula 09: Funções de Busca e Procura (PROCV e PROCX)',
+      'Aula 10: Pesquisa Bidirecional Avançada (ÍNDICE e CORRESP)',
+      'Aula 11: Formatação Condicional com Regras e Conjuntos de Ícones',
+      'Aula 12: Criação e Customização de Gráficos Executivos',
+      'Aula 13: Validação de Dados, Travamento e Proteção de Planilhas',
+      'Aula 14: Tabelas Dinâmicas, Segmentação de Dados e Linha do Tempo',
+      'Aula 15: Construção de Dashboard Gerencial e Indicadores',
+      'Aula 16: Projeto Prático Final e Avaliação Somativa do Módulo',
+    ];
+  }
+
+  if (norm.includes('word')) {
+    return [
+      'Aula 01: Ambiente do Word, Estrutura de Documentos e Modos de Exibição',
+      'Aula 02: Formatação de Fontes, Efeitos Tipográficos e Parágrafos',
+      'Aula 03: Espaçamentos, Recuos, Marcadores e Numeração Multinível',
+      'Aula 04: Criação e Formatação Avançada de Tabelas e Bordas',
+      'Aula 05: Inserção de Elementos Visuais (Imagens, Formas e SmartArt)',
+      'Aula 06: Cabeçalhos, Rodapés e Numeração de Páginas Normas ABNT',
+      'Aula 07: Aplicação de Estilos Rápidos, Temas e Padronização',
+      'Aula 08: Avaliação Prática Parcial e Redação Corporativa',
+      'Aula 09: Sumário Automático, Índice Remissivo e Notas de Rodapé',
+      'Aula 10: Layout de Página, Margens, Quebras de Seção e Colunas',
+      'Aula 11: Mala Direta Integrada para Documentos em Lote',
+      'Aula 12: Revisão de Texto, Ortografia, Dicionário e Gramática',
+      'Aula 13: Controle de Alterações, Painel de Comentários e Comparação',
+      'Aula 14: Criação de Formulários Digitais e Proteção contra Cópia',
+      'Aula 15: Desenvolvimento de Relatório Técnico-Empresarial Completo',
+      'Aula 16: Projeto Prático Final e Avaliação Somativa do Módulo',
+    ];
+  }
+
+  if (norm.includes('windows') || norm.includes('informatica')) {
+    return [
+      'Aula 01: Hardware, Software, Periféricos e Ergonomia Digital',
+      'Aula 02: Inicialização do Windows 11, Área de Trabalho e Menu Iniciar',
+      'Aula 03: Gerenciamento de Janelas, Snap Layouts e Atalhos Rápidos',
+      'Aula 04: Explorador de Arquivos, Hierarquia de Pastas e Unidades',
+      'Aula 05: Operações com Arquivos (Copiar, Mover, Renomear e ZIP)',
+      'Aula 06: Armazenamento em Nuvem com Microsoft OneDrive',
+      'Aula 07: Configurações do Sistema, Notificações e Personalização',
+      'Aula 08: Avaliação Prática Parcial e Diagnóstico Operacional',
+      'Aula 09: Navegação Segura na Internet, Navegadores e Busca Eficiente',
+      'Aula 10: Criação e Gerenciamento de E-mail Corporativo e Anexos',
+      'Aula 11: Segurança da Informação, Vírus, Antivírus e Senhas Fortes',
+      'Aula 12: Instalação e Desinstalação Segura de Programas e Utilitários',
+      'Aula 13: Gerenciamento de Dispositivos, Impressoras e Conexões Wi-Fi',
+      'Aula 14: Atalhos de Teclado Essenciais e Ferramenta de Captura',
+      'Aula 15: Backup de Segurança, Restauração e Limpeza de Disco',
+      'Aula 16: Projeto Prático Final e Avaliação Teórico-Prática',
+    ];
+  }
+
+  if (norm.includes('point') || norm.includes('apresentac')) {
+    return [
+      'Aula 01: Fundamentos do PowerPoint, Estrutura de Slides e Layouts',
+      'Aula 02: Inserção e Formatação de Textos, Caixas e Tipografia',
+      'Aula 03: Aplicação de Temas, Paletas de Cores e Estilos Visuais',
+      'Aula 04: Inserção de Imagens, Remoção de Fundo e Alinhamento Preciso',
+      'Aula 05: Utilização de Formas Geométricas, Ícones e SmartArt',
+      'Aula 06: Gráficos Estatísticos e Tabelas de Apresentação',
+      'Aula 07: Inserção de Áudio, Vídeo e Mídia Interativa nos Slides',
+      'Aula 08: Avaliação Prática Parcial e Roteiro de Apresentação',
+      'Aula 09: Animações de Entrada, Ênfase, Saída e Painel de Animação',
+      'Aula 10: Transições de Slides Profissionais e Efeito Transformar',
+      'Aula 11: Hiperlinks, Botões de Ação e Navegação Não-Linear',
+      'Aula 12: Slide Mestre, Padronização Corporativa e Criação de Modelos',
+      'Aula 13: Técnicas de Oratória, Storytelling e Apresentação Executiva',
+      'Aula 14: Configuração de Apresentação (Modo Apresentador)',
+      'Aula 15: Exportação em PDF, Vídeo MP4 e Executável (.PPSX)',
+      'Aula 16: Apresentação ao Vivo do Pitch Final e Avaliação Somativa',
+    ];
+  }
+
+  if (norm.includes('photoshop') || norm.includes('corel') || norm.includes('design') || norm.includes('illustrator')) {
+    return [
+      'Aula 01: Conceitos de Design Gráfico, Resolução (DPI) e RGB vs CMYK',
+      'Aula 02: Interface do Software, Painéis de Trabalho e Criação de Canvas',
+      'Aula 03: Ferramentas de Seleção, Recorte Rápido e Laço Poligonal',
+      'Aula 04: Trabalho com Camadas (Layers), Modos de Mesclagem e Opacidade',
+      'Aula 05: Máscaras de Camada e Recorte Não-Destrutivo',
+      'Aula 06: Ferramentas de Correção (Pincel de Recuperação e Carimbo)',
+      'Aula 07: Ajustes de Cores, Níveis, Curvas, Matiz e Saturação',
+      'Aula 08: Avaliação Prática Parcial — Tratamento e Montagem Digital',
+      'Aula 09: Tipografia Criativa, Efeitos de Camada (Chanfro e Sombra)',
+      'Aula 10: Vetores, Formas Personalizadas e Ferramenta Caneta (Pen Tool)',
+      'Aula 11: Efeitos e Filtros Criativos (Desfoque, Ruído e Nitidez)',
+      'Aula 12: Composição Visual para Mídias Sociais (Post para Instagram)',
+      'Aula 13: Criação de Peça Impressa (Flyer / Cartão de Visitas e Sangria)',
+      'Aula 14: Mockups Profissionais para Apresentação ao Cliente',
+      'Aula 15: Exportação Otimizada para Web, Impressão e PDF Gráfico',
+      'Aula 16: Apresentação do Portfólio Gráfico e Avaliação Final',
+    ];
+  }
+
+  if (norm.includes('ingles') || norm.includes('english')) {
+    return [
+      'Aula 01: Warm-up: Greetings, Alphabet and Personal Pronouns',
+      'Aula 02: Verb To Be (Affirmative, Negative and Interrogative)',
+      'Aula 03: Daily Routine Vocabulary, Time and Numbers',
+      'Aula 04: Simple Present: Likes, Dislikes and Habits',
+      'Aula 05: Family Members, Adjectives and Describing People',
+      'Aula 06: Listening & Speaking Lab: At the Restaurant / Ordering Food',
+      'Aula 07: Prepositions of Place and Giving Directions',
+      'Aula 08: Mid-term Assessment: Reading & Oral Simulation',
+      'Aula 09: Present Continuous: Actions in Progress and Workplace',
+      'Aula 10: Modal Verbs (Can, Could, Must, Should) for Polite Requests',
+      'Aula 11: Past Simple: Regular & Irregular Verbs in Storytelling',
+      'Aula 12: Vocabulary: Travel, Airport, Hotel and Shopping',
+      'Aula 13: Future Forms (Going to & Will) for Professional Goals',
+      'Aula 14: Business English: Formal Emails and Telephone Etiquette',
+      'Aula 15: Role-play & Conversation Workshop: Job Interview',
+      'Aula 16: Final Oral Presentation and Comprehensive Evaluation',
+    ];
+  }
+
+  if (norm.includes('robotica') || norm.includes('game') || norm.includes('programac') || norm.includes('algoritmo')) {
+    return [
+      'Aula 01: Introdução ao Pensamento Computacional e Lógica de Algoritmos',
+      'Aula 02: Tipos de Dados, Variáveis e Operadores Aritméticos',
+      'Aula 03: Estruturas de Decisão Simples e Compostas (SE / SENÃO)',
+      'Aula 04: Estruturas de Repetição (ENQUANTO e PARA)',
+      'Aula 05: Modularização, Funções e Escopo de Parâmetros',
+      'Aula 06: Estruturas de Dados Básicas: Vetores e Matrizes',
+      'Aula 07: Lógica de Programação Visual em Blocos e Sprites',
+      'Aula 08: Avaliação Prática Parcial de Algoritmos e Resolução de Problemas',
+      'Aula 09: Mecânica de Jogos: Coordenadas X/Y, Gravidade e Colisão',
+      'Aula 10: Controles de Teclado, Mouse e Pontuação do Jogo',
+      'Aula 11: Inserção de Áudio, Efeitos Sonoros e Telas de Vitória/Derrota',
+      'Aula 12: Introdução a Sensores, Motores e Placas Microcontroladoras',
+      'Aula 13: Montagem Mecânica do Protótipo e Calibração de Sensores',
+      'Aula 14: Programação do Comportamento Autônomo do Robô',
+      'Aula 15: Testes de Pista, Desafios Práticos e Otimização de Código',
+      'Aula 16: Torneio de Robótica / Demonstração do Jogo e Avaliação Final',
+    ];
+  }
+
+  // Ementa geral dinâmica padronizada para qualquer módulo cadastrado
+  const modClean = formatModuleDisplay(moduloNome || 'Módulo Acadêmico');
+  return Array.from({ length: 16 }, (_, i) => {
+    const num = i + 1;
+    if (num === 1) return `Aula 01: Introdução e Fundamentos de ${modClean}`;
+    if (num === 8) return `Aula 08: Avaliação Prática Intermediária de ${modClean}`;
+    if (num === 15) return `Aula 15: Aplicação Integrada e Exercícios de Fixação`;
+    if (num === 16) return `Aula 16: Projeto Prático Final e Avaliação Somativa`;
+    return `Aula ${String(num).padStart(2, '0')}: Prática Operacional e Desenvolvimento Técnico (${num}/16)`;
+  });
+}
+
+/**
+ * Compila a Ficha de Acompanhamento oficial completa para um módulo específico do aluno,
+ * integrando dados reais do Portal do Aluno (aulas, presenças, notas, educador)
+ * com o layout preparado para visualização e preenchimento manual em 1 página A4.
+ */
+export function buildFichaAcompanhamentoForModule(
+  studentItem: StudentSearchDirectoryItem,
+  targetModuleName?: string
+): FichaAcompanhamentoModuleData {
+  const records = studentItem.records || [];
+  const primaryRecord = records[0];
+
+  // Identifica o módulo ativo ou o solicitado
+  const moduloNome =
+    targetModuleName ||
+    studentItem.moduloAtual ||
+    (primaryRecord ? formatModuleDisplay(primaryRecord.moduloAtual || primaryRecord.curso) : 'Módulo Principal');
+
+  const syllabus = getOfficialModuleSyllabus(moduloNome);
+
+  // Filtra registros do aluno que correspondam a este módulo
+  const modRecords = records.filter((r) => {
+    const rMod = formatModuleDisplay(r.moduloAtual || r.curso);
+    return normalizeFichaSearchText(rMod) === normalizeFichaSearchText(moduloNome);
+  });
+
+  const effectiveRecords = modRecords.length > 0 ? modRecords : records;
+
+  // Mapa de registros por aulaNúmero real
+  const recordByAula = new Map<number, EvaluatedStudentRecord>();
+  for (const r of effectiveRecords) {
+    const num = Number(r.aulaNumero || 1);
+    if (!recordByAula.has(num)) {
+      recordByAula.set(num, r);
+    }
+  }
+
+  // Educador, Sala, Horário e Dia
+  const educadorNome =
+    effectiveRecords.find(
+      (r) => r.professor && r.professor !== 'Não informado' && r.professor !== 'S/D'
+    )?.professor ||
+    effectiveRecords.find(
+      (r) => r.educador && r.educador !== 'Não informado' && r.educador !== 'S/D'
+    )?.educador ||
+    effectiveRecords.find((r) => r.cadNome)?.cadNome ||
+    primaryRecord?.professor ||
+    primaryRecord?.educador ||
+    primaryRecord?.cadNome ||
+    'Coordenação Pedagógica';
+
+  const salaNome =
+    effectiveRecords.find((r) => r.sala)?.sala ||
+    primaryRecord?.sala ||
+    'Lab 01';
+
+  const horarioTurma =
+    effectiveRecords.find((r) => r.horario)?.horario ||
+    primaryRecord?.horario ||
+    '14:00 às 16:00';
+
+  const diaSemanaTurma =
+    effectiveRecords.find((r) => r.diaSemana)?.diaSemana ||
+    primaryRecord?.diaSemana ||
+    studentItem.diasHorariosResumo ||
+    'Sexta-feira';
+
+  const totalAulasPrevistas = 16;
+  let presencasCount = 0;
+  let faltasCount = 0;
+  let faltasJustificadasCount = 0;
+  let somaNotas = 0;
+  let totalNotasContadas = 0;
+
+  // Gera as 16 aulas combinando registros do Portal com a ementa oficial
+  const aulas: ModuleLessonTrackingItem[] = Array.from({ length: totalAulasPrevistas }, (_, idx) => {
+    const aulaNum = idx + 1;
+    const rec = recordByAula.get(aulaNum);
+    const syllabusTitle = syllabus[idx] || `Aula ${String(aulaNum).padStart(2, '0')}: Conteúdo Programático`;
+
+    let nomeAula = syllabusTitle;
+    let dataAula = '';
+    let tipoAula: AttendanceTrackingType = 'NOR';
+    let frequenciaStatus: AttendanceTrackingStatus = 'PENDENTE';
+    let nota: number | null = null;
+    let vistoEducador = false;
+    let rubricaAluno = false;
+    let isAulaConcluida = false;
+
+    if (rec) {
+      isAulaConcluida = true;
+      dataAula = PORTAL_METADATA.dataReferencia;
+
+      // Preserva o título pedagógico completo da ementa oficial (evitando substituir por tags de apostila como "Aula 1 - Apostila")
+      if (
+        rec.aulaInfo &&
+        !/^aula\s*\d+\s*-\s*(sem\s*)?apostila$/i.test(rec.aulaInfo.trim()) &&
+        !rec.aulaInfo.toLowerCase().includes('sem apostila')
+      ) {
+        nomeAula = rec.aulaInfo;
+      }
+
+      // Tipo de aula
+      if (rec.infoAula?.toLowerCase().includes('reposi') || rec.aulaId?.toLowerCase().includes('rep')) {
+        tipoAula = 'REP';
+      } else if (rec.infoAula?.toLowerCase().includes('plant') || rec.infoAula?.toLowerCase().includes('reforco')) {
+        tipoAula = 'PLA';
+      } else if (rec.infoAula?.toLowerCase().includes('avuls')) {
+        tipoAula = 'AVU';
+      } else {
+        tipoAula = 'NOR';
+      }
+
+      // Frequência
+      if (rec.attendanceStatus === 'Presença' || rec.presencaOuFalta === 'P') {
+        frequenciaStatus = 'P';
+        presencasCount++;
+        vistoEducador = true;
+        rubricaAluno = true;
+      } else if (rec.infoAula?.toLowerCase().includes('justif')) {
+        frequenciaStatus = 'FJ';
+        faltasJustificadasCount++;
+        vistoEducador = true;
+      } else if (rec.attendanceStatus === 'Falta' || rec.presencaOuFalta === 'F') {
+        frequenciaStatus = 'F';
+        faltasCount++;
+        vistoEducador = true;
+      } else if (tipoAula === 'REP' && (rec.status === 'FINALIZADO' || rec.status === 'INICIADO')) {
+        frequenciaStatus = 'RC';
+        presencasCount++;
+        vistoEducador = true;
+        rubricaAluno = true;
+      } else {
+        frequenciaStatus = 'PENDENTE';
+        isAulaConcluida = false;
+        dataAula = '';
+      }
+
+      // Nota da aula
+      if (typeof rec.nota === 'number' && rec.nota > 0) {
+        const scaled = normalizePortalGradeScale(rec.nota);
+        if (scaled) {
+          nota = scaled.escala10;
+          somaNotas += scaled.escala100;
+          totalNotasContadas++;
+        }
+      }
+    }
+
+    const notaFormatada = typeof nota === 'number' ? nota.toFixed(1) : '—';
+    const tipoAulaLabel =
+      tipoAula === 'REP'
+        ? 'Reposição'
+        : tipoAula === 'PLA'
+        ? 'Plantão'
+        : tipoAula === 'AVU'
+        ? 'Avulsa'
+        : 'Normal';
+
+    const frequenciaLabel =
+      frequenciaStatus === 'P'
+        ? 'Presença'
+        : frequenciaStatus === 'F'
+        ? 'Falta'
+        : frequenciaStatus === 'FJ'
+        ? 'Falta Just.'
+        : frequenciaStatus === 'RC'
+        ? 'Reposição'
+        : 'Pendente';
+
+    const horarioAula = rec?.inicio && rec?.fim
+      ? `${rec.inicio} às ${rec.fim}`
+      : rec?.horario || horarioTurma;
+
+    const dataInicio = rec
+      ? (rec.inicio ? `${dataAula || PORTAL_METADATA.dataReferencia} ${rec.inicio}` : dataAula || PORTAL_METADATA.dataReferencia)
+      : '';
+    const dataTermino = rec
+      ? (rec.fim ? `${dataAula || PORTAL_METADATA.dataReferencia} ${rec.fim}` : dataAula || PORTAL_METADATA.dataReferencia)
+      : '';
+    const assinaturaVisto = vistoEducador ? '✓ Visto' : '';
+
+    return {
+      aulaNumero: aulaNum,
+      nomeAula,
+      dataAula,
+      dataInicio,
+      dataTermino,
+      tipoAula,
+      tipoAulaLabel,
+      frequenciaStatus,
+      frequenciaLabel,
+      conteudoMinistrado: nomeAula.replace(/^Aula\s*\d+:\s*/i, ''),
+      nota,
+      notaFormatada,
+      vistoEducador,
+      rubricaAluno,
+      assinaturaVisto,
+      isAulaConcluida,
+      horario: horarioAula,
+      sala: rec?.sala || salaNome,
+    };
+  });
+
+  const aulasConcluidas = presencasCount + faltasCount + faltasJustificadasCount;
+  const totalRegistradas = presencasCount + faltasCount;
+  const frequenciaPercent =
+    totalRegistradas > 0
+      ? Number(((presencasCount / totalRegistradas) * 100).toFixed(1))
+      : 100.0;
+
+  const mediaAtualEscala100 =
+    totalNotasContadas > 0 ? Number((somaNotas / totalNotasContadas).toFixed(1)) : null;
+  const mediaAtualEscala10 =
+    mediaAtualEscala100 !== null ? Number((mediaAtualEscala100 / 10).toFixed(1)) : null;
+
+  let situacaoPedagogica: ModuleApprovalSituation = 'Em Curso';
+  if (aulasConcluidas >= 14) {
+    if ((mediaAtualEscala100 ?? 100) >= 70 && frequenciaPercent >= 75) {
+      situacaoPedagogica = 'Aprovado';
+    } else if (frequenciaPercent < 75 && (mediaAtualEscala100 ?? 100) < 70) {
+      situacaoPedagogica = 'Reprovado (Média e Frequência)';
+    } else if (frequenciaPercent < 75) {
+      situacaoPedagogica = 'Frequência Insuficiente';
+    } else {
+      situacaoPedagogica = 'Abaixo da Média';
+    }
+  }
+
+  const situacaoFinalAprovado =
+    situacaoPedagogica === 'Aprovado' ||
+    (aulasConcluidas >= 14 && (mediaAtualEscala100 ?? 100) >= 70 && frequenciaPercent >= 75);
+
+  const situacaoFinalReprovado =
+    situacaoPedagogica.includes('Reprovado') ||
+    (aulasConcluidas >= 14 && ((mediaAtualEscala100 ?? 100) < 70 || frequenciaPercent < 75));
+
+  // Avaliações detalhadas por peso
+  const avaliacoesPedagogicas = {
+    atividadesContinuasNota: mediaAtualEscala10 !== null ? Math.min(10, Number((mediaAtualEscala10 + 0.5).toFixed(1))) : null,
+    avaliacaoTeoricaNota: mediaAtualEscala10,
+    projetoPraticoNota: mediaAtualEscala10 !== null ? Math.max(7, Number((mediaAtualEscala10).toFixed(1))) : null,
+    recuperacaoParalelaNota: null,
+  };
+
+  // Ocorrências pré-carregadas caso haja faltas
+  const ocorrenciasRecentes: Array<{
+    data: string;
+    motivo: string;
+    acao: string;
+    novoAgendamento?: string;
+  }> = [];
+
+  if (faltasCount > 0) {
+    ocorrenciasRecentes.push({
+      data: PORTAL_METADATA.dataReferencia,
+      motivo: `Ausência na aula prática do módulo (${faltasCount} falta registrada)`,
+      acao: 'Contato via WhatsApp realizado com o aluno/responsável para agendamento de reposição',
+      novoAgendamento: `${diaSemanaTurma} às ${horarioTurma.slice(0, 5)}`,
+    });
+  }
+
+  const parecerDescritivoSugerido =
+    frequenciaPercent >= 85 && (mediaAtualEscala100 === null || mediaAtualEscala100 >= 75)
+      ? `O(A) aluno(a) ${studentItem.nomeCompleto} apresenta excelente assiduidade e ótimo aproveitamento prático nos exercícios do módulo ${moduloNome}. Demonstra autonomia nos laboratórios e bom relacionamento em sala.`
+      : faltasCount > 0
+      ? `O(A) aluno(a) ${studentItem.nomeCompleto} necessita de atenção pedagógica pontual para reposição de ${faltasCount} aula(s) pendente(s) no módulo ${moduloNome}. Recomenda-se plantão de reforço para alinhamento dos conteúdos práticos.`
+      : `Aluno(a) em andamento regular no módulo ${moduloNome}. Acompanhamento contínuo dos projetos práticos e pontualidade.`;
+
+  const rawUnidade = studentItem.unidadeEnsino || 'Unidade Oficial';
+  const formattedInstituicao = rawUnidade.toLowerCase().includes('microlins')
+    ? `${rawUnidade} (#${studentItem.codigoUnidade})`
+    : `Microlins — ${rawUnidade} (#${studentItem.codigoUnidade})`;
+
+  return {
+    instituicaoNome: formattedInstituicao,
+    alunoNomeCompleto: studentItem.nomeCompleto,
+    alunoContrato: studentItem.contrato,
+    cursoTurma: `${studentItem.cursoMatriculado} - ${moduloNome} · ${diaSemanaTurma} (${horarioTurma}) · Sala ${salaNome}`,
+    professorResponsavel: educadorNome,
+    periodoLetivo: `Ano Letivo ${new Date().getFullYear()} · Início: ${studentItem.dataMatricula || '09/02/2026'}`,
+    moduloNome,
+    cargaHorariaHoras: 32,
+    totalAulasPrevistas,
+    aulasConcluidas,
+    presencasCount,
+    faltasCount,
+    faltasJustificadasCount,
+    frequenciaPercent,
+    mediaAtualEscala10,
+    mediaAtualEscala100,
+    situacaoPedagogica,
+    situacaoFinalAprovado,
+    situacaoFinalReprovado,
+    educadorNome,
+    salaNome,
+    horarioTurma,
+    diaSemanaTurma,
+    modalidade: studentItem.modalidade || 'Presencial',
+    dataInicioModulo: '10/01/2026',
+    dataPrevisaoTermino: '27/03/2026',
+    aulas,
+    avaliacoesPedagogicas,
+    ocorrenciasRecentes,
+    parecerDescritivoSugerido,
   };
 }

@@ -47,7 +47,7 @@ import {
 } from '../data/microlinsData';
 
 test('Seção 3 — Autenticação de Produção (Admin, Escola e Fallback Resiliente)', () => {
-  const adminPass = 'AdminProd@2026!';
+  const adminPass = '2ab@283';
   const schoolPass = 'SchoolProd@2026!';
   const adminCredentials = {
     login: DEFAULT_ADMIN_CREDENTIALS.login,
@@ -68,7 +68,7 @@ test('Seção 3 — Autenticação de Produção (Admin, Escola e Fallback Resil
     }
   );
 
-  // 1. Login Admin válido
+  // 1. Login Admin válido exclusivamente com 2ab@283
   const adminRes = authenticatePlatformLogin(
     schools,
     DEFAULT_ADMIN_CREDENTIALS.login,
@@ -77,6 +77,24 @@ test('Seção 3 — Autenticação de Produção (Admin, Escola e Fallback Resil
   );
   assert.equal(adminRes.ok, true);
   assert.equal(adminRes.session?.role, 'ADMIN');
+
+  // 1.1 Senha antiga ou incorreta deve ser rejeitada
+  const oldPassRes = authenticatePlatformLogin(
+    schools,
+    DEFAULT_ADMIN_CREDENTIALS.login,
+    'Alisson@2026',
+    adminCredentials
+  );
+  assert.equal(oldPassRes.ok, false);
+
+  // 1.2 Alias não cadastrado como admin deve ser rejeitado
+  const aliasRes = authenticatePlatformLogin(
+    schools,
+    'alisson',
+    adminPass,
+    adminCredentials
+  );
+  assert.equal(aliasRes.ok, false);
 
   // 2. Login Escola válido (a116882)
   const schoolRes = authenticatePlatformLogin(schools, 'a116882', schoolPass, adminCredentials);

@@ -25,6 +25,7 @@ import {
 import {
   AuthSession,
   computeUserSyncDifferences,
+  isGenericPlaceholderUserName,
   NpsConnectionStatus,
   RegisteredSchool,
   sanitizeSchoolsForClient,
@@ -51,6 +52,7 @@ import {
   recordSyncLog,
   releaseSchoolSyncLock,
   revokeSessionTokenInDb,
+  syncUserProfileFromPortalInDb,
   toggleSchoolStatusInDb,
   toggleUserStatusInDb,
   updateAdminPasswordInDb,
@@ -404,6 +406,13 @@ async function authenticatePortalSession(forceRenew = false): Promise<boolean> {
       }
       if (decoded.NomeCargo) {
         portalSession.cachedMetadata.usuarioCargo = decoded.NomeCargo;
+      }
+      if (decoded.Nome) {
+        syncUserProfileFromPortalInDb(
+          decoded.login || PORTAL_MICROLINS_LOGIN,
+          decoded.Nome,
+          decoded.NomeCargo
+        );
       }
     } catch {
       // Keep default metadata if decoding fails
@@ -3149,12 +3158,24 @@ async function startServer() {
       indecxSession.expiresAt = 0;
     }
 
+    const sameLoginInCache =
+      portalSession.cachedMetadata.usuarioLogin?.toLowerCase() ===
+      user.login.toLowerCase();
+    const resolvedFullName = !isGenericPlaceholderUserName(user.nomeCompleto)
+      ? user.nomeCompleto
+      : sameLoginInCache &&
+        !isGenericPlaceholderUserName(
+          portalSession.cachedMetadata.usuarioNomeCompleto
+        )
+      ? portalSession.cachedMetadata.usuarioNomeCompleto
+      : user.nomeCompleto;
+
     portalSession.cachedMetadata = {
       ...portalSession.cachedMetadata,
       unidade: school.nome,
       usuarioLogin: user.login,
-      usuarioNomeCompleto: user.nomeCompleto,
-      usuarioCargo: user.cargo,
+      usuarioNomeCompleto: resolvedFullName,
+      usuarioCargo: user.cargo || portalSession.cachedMetadata.usuarioCargo,
     };
   }
 

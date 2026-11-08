@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { motion } from 'motion/react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -113,7 +114,6 @@ export const NpsResendEmailModal: React.FC<NpsResendEmailModalProps> = ({
         ) {
           throw apiErr;
         }
-        // Fallback direto para Supabase caso esteja em ambiente serverless estático
         const supaRes = await resendNpsEmailInSupabase({
           inviteId: invitation.id,
           contrato: displayContract,
@@ -154,18 +154,29 @@ export const NpsResendEmailModal: React.FC<NpsResendEmailModalProps> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/75 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="nps-resend-email-title"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/75 backdrop-blur-sm p-4"
       onClick={onClose}
       data-testid="nps-resend-email-modal-backdrop"
     >
-      <div
-        className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden"
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 12 }}
+        transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
+        className="glass-modal bg-[var(--surface-elevated)] rounded-2xl shadow-2xl border border-[var(--border-color)] w-full max-w-md overflow-hidden"
         onClick={(e) => e.stopPropagation()}
         data-testid="nps-resend-email-modal"
       >
         {/* Header */}
-        <div className="bg-gradient-to-r from-indigo-950 via-indigo-900 to-blue-900 px-5 py-4 text-white flex items-center justify-between">
+        <div className="bg-gradient-to-r from-[#0F172A] via-[#1E3A8A] to-[#2563EB] px-5 py-4 text-white flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center">
               <Mail className="w-4 h-4 text-sky-300" />
@@ -174,7 +185,7 @@ export const NpsResendEmailModal: React.FC<NpsResendEmailModalProps> = ({
               <span className="text-[10px] font-bold uppercase tracking-wider text-sky-300 block">
                 Integração Oficial Indecx · E-mail
               </span>
-              <h3 className="text-sm font-black tracking-tight">
+              <h3 id="nps-resend-email-title" className="text-sm font-black tracking-tight">
                 Reenviar Pesquisa NPS por E-mail
               </h3>
             </div>
@@ -182,7 +193,7 @@ export const NpsResendEmailModal: React.FC<NpsResendEmailModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-slate-200 transition-colors cursor-pointer"
+            className="btn-press w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-slate-200 transition-colors cursor-pointer"
             title="Fechar"
             data-testid="nps-resend-email-close-btn"
           >
@@ -191,38 +202,37 @@ export const NpsResendEmailModal: React.FC<NpsResendEmailModalProps> = ({
         </div>
 
         <form onSubmit={handleConfirmResend} className="p-5 space-y-4">
-          {/* Orientação oficial (Seção 1.2) */}
-          <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 border border-slate-200/80 rounded-xl p-3">
+          <p className="text-xs text-[var(--text-secondary)] leading-relaxed bg-[var(--bg-secondary)]/80 border border-[var(--border-color)] rounded-xl p-3">
             Confirme o endereço de e-mail para o qual deseja enviar novamente o
             convite da pesquisa NPS. Caso necessário, você poderá corrigir o
             endereço antes do envio.
           </p>
 
           {/* Dados do Aluno e E-mail Atual */}
-          <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2">
+          <div className="surface-solid rounded-xl border border-[var(--border-color)] p-3.5 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                <User className="w-3 h-3 text-indigo-500" /> Nome do Aluno
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)] flex items-center gap-1">
+                <User className="w-3 h-3 text-[var(--color-primary)]" /> Nome do Aluno
               </span>
               {displayContract && (
-                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800">
                   Contrato #{displayContract}
                 </span>
               )}
             </div>
             <p
-              className="text-xs font-black text-slate-900"
+              className="text-xs font-black text-[var(--text-primary)]"
               data-testid="nps-resend-student-name"
             >
               {displayName}
             </p>
 
-            <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-[11px]">
-              <span className="font-semibold text-slate-500">
+            <div className="pt-2 border-t border-[var(--border-color)] flex items-center justify-between gap-2 text-[11px]">
+              <span className="font-semibold text-[var(--text-secondary)]">
                 E-mail atualmente cadastrado:
               </span>
               <span
-                className="font-mono font-bold text-slate-700 break-all"
+                className="font-mono font-bold text-[var(--text-primary)] break-all"
                 data-testid="nps-resend-current-email"
               >
                 {registeredEmail || 'Não cadastrado'}
@@ -234,7 +244,7 @@ export const NpsResendEmailModal: React.FC<NpsResendEmailModalProps> = ({
           <div>
             <label
               htmlFor="nps-resend-email-input"
-              className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1.5"
+              className="block text-[11px] font-black uppercase tracking-wider text-[var(--text-primary)] mb-1.5"
             >
               Endereço de E-mail para Envio / Correção Cadastral
             </label>
@@ -250,7 +260,7 @@ export const NpsResendEmailModal: React.FC<NpsResendEmailModalProps> = ({
                 }}
                 placeholder="exemplo@dominio.com.br"
                 disabled={submitting}
-                className="w-full pl-9 pr-3 py-2.5 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                className="surface-solid w-full pl-9 pr-3 py-2.5 text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-color)] rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)] transition-all"
                 data-testid="nps-resend-email-input"
                 required
               />
@@ -261,12 +271,12 @@ export const NpsResendEmailModal: React.FC<NpsResendEmailModalProps> = ({
           <div
             className={`rounded-xl p-3 border text-[11px] flex items-start gap-2 ${
               isChanged
-                ? 'bg-amber-50 border-amber-200 text-amber-900'
-                : 'bg-indigo-50/70 border-indigo-200/80 text-indigo-900'
+                ? 'bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-950/50 dark:border-amber-800 dark:text-amber-200'
+                : 'bg-blue-50/70 border-blue-200/80 text-blue-900 dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-200'
             }`}
             data-testid="nps-resend-registration-notice"
           >
-            <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-indigo-600" />
+            <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-primary)]" />
             <div>
               <span className="font-bold block">
                 Atualização Automática do Cadastro Oficial
@@ -281,38 +291,38 @@ export const NpsResendEmailModal: React.FC<NpsResendEmailModalProps> = ({
 
           {errorMsg && (
             <div
-              className="rounded-xl bg-rose-50 border border-rose-200 p-3 text-xs text-rose-800 font-semibold flex items-start gap-2"
+              className="rounded-xl bg-rose-50 border border-rose-200 p-3 text-xs text-rose-800 font-semibold flex items-start gap-2 dark:bg-rose-950/50 dark:border-rose-800 dark:text-rose-200"
               data-testid="nps-resend-error-alert"
             >
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           {successMsg && (
             <div
-              className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-800 font-semibold flex items-start gap-2"
+              className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-800 font-semibold flex items-start gap-2 dark:bg-emerald-950/50 dark:border-emerald-800 dark:text-emerald-200"
               data-testid="nps-resend-success-alert"
             >
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
               <span>{successMsg}</span>
             </div>
           )}
 
           {/* Botões */}
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--border-color)]">
             <button
               type="button"
               onClick={onClose}
               disabled={submitting}
-              className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              className="btn-press px-3.5 py-2 rounded-xl border border-[var(--border-color)] text-xs font-bold text-[var(--text-secondary)] hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={submitting || !emailCheck.valid}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:text-slate-500 text-white text-xs font-black shadow-sm transition-colors cursor-pointer"
+              className="btn-press inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[var(--color-primary)] hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500 text-white text-xs font-black shadow-sm transition-colors cursor-pointer"
               data-testid="nps-resend-confirm-btn"
             >
               {submitting ? (
@@ -331,7 +341,7 @@ export const NpsResendEmailModal: React.FC<NpsResendEmailModalProps> = ({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 };

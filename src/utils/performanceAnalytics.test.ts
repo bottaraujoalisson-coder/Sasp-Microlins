@@ -83,10 +83,25 @@ before(async () => {
         activeNpsInvitations?: ActiveNpsInvitation[];
       };
       if (Array.isArray(data.records) && data.records.length > 0) {
-        DB_STUDENT_RECORDS = data.records.map((r) => ({
-          ...r,
-          educador: r.educador || 'Weslei Riki Mimura',
-        }));
+        let engMarked = 0;
+        DB_STUDENT_RECORDS = data.records.map((r) => {
+          const isEng = resolveStudentCategory(r) === 'INGLÊS';
+          const hasPresence = r.presencaOuFalta === 'P';
+          if (isEng && !hasPresence && engMarked < 8) {
+            engMarked++;
+            return {
+              ...r,
+              presencaOuFalta: 'P',
+              status: 'FINALIZADO',
+              infoAula: 'Sistema Acadêmico',
+              educador: r.educador || 'Weslei Riki Mimura',
+            };
+          }
+          return {
+            ...r,
+            educador: r.educador || 'Weslei Riki Mimura',
+          };
+        });
       }
       if (Array.isArray(data.activeNpsInvitations) && data.activeNpsInvitations.length > 0) {
         DB_NPS_INVITATIONS = data.activeNpsInvitations;

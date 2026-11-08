@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { motion } from 'motion/react';
 import {
   AlertTriangle,
   Calendar,
@@ -20,7 +21,6 @@ import {
   UserCheck,
   Users,
   X,
-  XCircle,
 } from 'lucide-react';
 import { ActiveNpsInvitation } from '../data/microlinsData';
 import {
@@ -30,6 +30,7 @@ import {
 } from '../utils/performanceAnalytics';
 import { prioritizeNpsInPortalSupabase } from '../utils/supabaseClient';
 import { NpsResendEmailModal } from './NpsResendEmailModal';
+import { SmartAvatar, useToast } from './uiSystem';
 
 interface NpsInvitationDetailModalProps {
   studentCard: SynchronizedNpsStudentCard | null;
@@ -56,6 +57,7 @@ export const NpsInvitationDetailModal: React.FC<
   onInvitationUpdated,
   onClose,
 }) => {
+  const { toast } = useToast();
   const [copiedField, setCopiedField] = useState<'id' | null>(null);
   const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
   const [showResendEmailModal, setShowResendEmailModal] = useState(false);
@@ -104,16 +106,9 @@ export const NpsInvitationDetailModal: React.FC<
   const isAnswered = Boolean(
     activeInvitation.answered || statusLower === 'respondido'
   );
-  const isExpired = statusLower === 'expirado';
   const isPrioritizedOnPortal = Boolean(
     activeInvitation.priorizarNpsNoLogin && !isAnswered
   );
-
-  const statusLabel = isAnswered
-    ? 'Respondida'
-    : isExpired
-    ? 'Expirada'
-    : 'Ativa';
 
   const salaDisplay = formatFullSalaName(studentCard.linkedSala);
 
@@ -121,6 +116,11 @@ export const NpsInvitationDetailModal: React.FC<
     try {
       await navigator.clipboard.writeText(text);
       setCopiedField('id');
+      toast({
+        type: 'info',
+        title: 'Código Indecx copiado',
+        message: `#${text}`,
+      });
       setTimeout(() => setCopiedField(null), 2000);
     } catch {
       // Clipboard fallback
@@ -189,12 +189,23 @@ export const NpsInvitationDetailModal: React.FC<
         type: 'success',
         message: msg,
       });
+      toast({
+        type: 'success',
+        title: nextPriority ? 'Priorizado no Portal' : 'Priorização Removida',
+        message: msg,
+      });
     } catch (err: any) {
+      const errMsg =
+        err?.message ||
+        'Não foi possível atualizar a priorização no Portal do Aluno.';
       setFeedbackToast({
         type: 'error',
-        message:
-          err?.message ||
-          'Não foi possível atualizar a priorização no Portal do Aluno.',
+        message: errMsg,
+      });
+      toast({
+        type: 'error',
+        title: 'Erro na Priorização',
+        message: errMsg,
       });
     } finally {
       setPrioritizingPortal(false);
@@ -202,44 +213,60 @@ export const NpsInvitationDetailModal: React.FC<
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-end bg-slate-900/55 backdrop-blur-xs transition-opacity duration-200"
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="fixed inset-0 z-50 flex items-center justify-end bg-slate-950/60 backdrop-blur-xs"
       role="dialog"
       aria-modal="true"
       aria-labelledby="nps-invitation-detail-title"
       onClick={onClose}
     >
-      <div
-        className="flex h-full w-full max-w-xl flex-col overflow-hidden border-l border-slate-200 bg-white shadow-2xl transition-transform duration-200 dark:border-slate-800 dark:bg-slate-900"
+      <motion.div
+        initial={{ x: '100%' }}
+        animate={{ x: 0 }}
+        exit={{ x: '100%' }}
+        transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
+        className="glass-modal flex h-full w-full max-w-xl flex-col overflow-hidden border-l border-[var(--border-color)] bg-[var(--surface-elevated)] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Cabeçalho */}
-        <div className="flex shrink-0 items-start justify-between border-b border-[#003A70] bg-[#004A8D] px-5 py-4 text-white">
-          <div className="min-w-0 flex-1 pr-3">
-            <div className="typo-meta flex flex-wrap items-center gap-2 text-sky-100 tabular-nums">
-              <span className="font-semibold text-white">
-                Contrato #{studentCard.linkedContrato}
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>{studentCard.linkedDiaSemana}</span>
-              <span aria-hidden="true">·</span>
-              <span>{studentCard.linkedHorario}</span>
+        <div className="flex shrink-0 items-start justify-between border-b border-blue-800 bg-gradient-to-r from-[#0F172A] via-[#1E3A8A] to-[#2563EB] px-5 py-4 text-white">
+          <div className="flex min-w-0 flex-1 items-center gap-3.5 pr-3">
+            <SmartAvatar
+              name={studentCard.linkedStudentName}
+              contrato={studentCard.linkedContrato}
+              size="lg"
+              statusDot={isAnswered ? 'success' : 'warning'}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="typo-meta flex flex-wrap items-center gap-2 font-mono text-sky-100 tabular-nums">
+                <span className="font-semibold text-white">
+                  Contrato #{studentCard.linkedContrato}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span>{studentCard.linkedDiaSemana}</span>
+                <span aria-hidden="true">·</span>
+                <span>{studentCard.linkedHorario}</span>
+              </div>
+              <h2
+                id="nps-invitation-detail-title"
+                className="typo-title-section mt-0.5 truncate text-white"
+              >
+                {studentCard.linkedStudentName}
+              </h2>
+              <p className="typo-meta mt-0.5 truncate text-sky-100/90">
+                Ciclo {currentYear} · {salaDisplay}
+              </p>
             </div>
-            <h2
-              id="nps-invitation-detail-title"
-              className="typo-title-main mt-1 truncate text-white"
-            >
-              {studentCard.linkedStudentName}
-            </h2>
-            <p className="typo-meta mt-0.5 text-sky-100/90">
-              Ciclo {currentYear} · {salaDisplay}
-            </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Fechar detalhes do convite NPS"
-            className="rounded-lg p-1.5 text-sky-100 transition-colors hover:bg-white/10 hover:text-white cursor-pointer"
+            className="btn-press rounded-xl p-1.5 text-sky-100 transition-colors hover:bg-white/15 hover:text-white cursor-pointer"
           >
             <X className="h-5 w-5" />
           </button>
@@ -258,7 +285,7 @@ export const NpsInvitationDetailModal: React.FC<
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span
-                className={`typo-badge inline-flex items-center gap-1 rounded border px-2 py-0.5 font-bold ${
+                className={`typo-badge inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-bold ${
                   isResponsavel
                     ? 'border-fuchsia-300 bg-white text-fuchsia-900 dark:border-fuchsia-700 dark:bg-fuchsia-900/70 dark:text-fuchsia-200'
                     : 'border-purple-300 bg-white text-purple-900 dark:border-purple-700 dark:bg-purple-900/70 dark:text-purple-200'
@@ -308,8 +335,8 @@ export const NpsInvitationDetailModal: React.FC<
                 data-testid="nps-modal-recovery-feedback"
                 className={`rounded-lg border px-3 py-2 text-xs font-bold flex items-center gap-2 ${
                   feedbackToast.type === 'success'
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                    : 'bg-rose-50 border-rose-300 text-rose-900'
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-900 dark:bg-emerald-950/60 dark:border-emerald-800 dark:text-emerald-200'
+                    : 'bg-rose-50 border-rose-300 text-rose-900 dark:bg-rose-950/60 dark:border-rose-800 dark:text-rose-200'
                 }`}
               >
                 <CheckCircle2 className="h-4 w-4 shrink-0" />
@@ -324,7 +351,7 @@ export const NpsInvitationDetailModal: React.FC<
                   disabled={isAnswered}
                   onClick={() => setShowResendEmailModal(true)}
                   data-testid="nps-modal-resend-email-btn"
-                  className="typo-btn inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-indigo-600 bg-indigo-600 px-3 text-white transition-colors hover:bg-indigo-700 disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 cursor-pointer"
+                  className="btn-press typo-btn inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-indigo-600 bg-indigo-600 px-3 text-white transition-colors hover:bg-indigo-700 disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 cursor-pointer"
                 >
                   <Mail className="h-4 w-4 shrink-0" />
                   <span>Reenviar por E-mail</span>
@@ -335,10 +362,10 @@ export const NpsInvitationDetailModal: React.FC<
                   disabled={isAnswered || prioritizingPortal}
                   onClick={handleTogglePortalPriority}
                   data-testid="nps-modal-prioritize-portal-btn"
-                  className={`typo-btn inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border px-3 transition-colors cursor-pointer ${
+                  className={`btn-press typo-btn inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border px-3 transition-colors cursor-pointer ${
                     isPrioritizedOnPortal
                       ? 'border-amber-600 bg-amber-500 text-white hover:bg-amber-600'
-                      : 'border-sky-700 bg-sky-700 text-white hover:bg-sky-800'
+                      : 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white hover:bg-blue-700'
                   } disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500`}
                 >
                   {prioritizingPortal ? (
@@ -354,7 +381,7 @@ export const NpsInvitationDetailModal: React.FC<
                 </button>
               </div>
             ) : (
-              <div className="rounded-lg border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600 flex items-center gap-2">
+              <div className="rounded-lg border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600 flex items-center gap-2 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300">
                 <Lock className="h-3.5 w-3.5 text-slate-400" />
                 <span>Reenvio disponível para Coordenação e Secretaria.</span>
               </div>
@@ -363,40 +390,40 @@ export const NpsInvitationDetailModal: React.FC<
 
           {/* Vínculo com o Kanban */}
           <div className="space-y-2">
-            <h3 className="typo-title-section flex items-center gap-1.5 text-slate-800 dark:text-slate-200">
-              <Link2 className="h-4 w-4 text-[#004A8D] dark:text-sky-400" />
+            <h3 className="typo-title-section flex items-center gap-1.5 text-[var(--text-primary)]">
+              <Link2 className="h-4 w-4 text-[var(--color-primary)]" />
               Dados da Aula
             </h3>
-            <div className="typo-card-body grid grid-cols-2 gap-3 rounded-xl border border-sky-200/80 bg-sky-50/40 p-3.5 sm:grid-cols-3 dark:border-sky-800/60 dark:bg-sky-950/30">
+            <div className="typo-card-body surface-solid grid grid-cols-2 gap-3 rounded-xl border border-[var(--border-color)] p-3.5 sm:grid-cols-3">
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Horário
                 </span>
-                <p className="mt-0.5 font-bold text-[#004A8D] tabular-nums dark:text-sky-400">
+                <p className="mt-0.5 font-mono font-bold text-[var(--color-primary)] tabular-nums">
                   {studentCard.linkedHourKey} ({studentCard.linkedHorario})
                 </p>
               </div>
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Sala
                 </span>
-                <p className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">
+                <p className="mt-0.5 font-semibold text-[var(--text-primary)]">
                   {salaDisplay}
                 </p>
               </div>
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Status
                 </span>
-                <p className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">
+                <p className="mt-0.5 font-semibold text-[var(--text-primary)]">
                   {studentCard.linkedAttendanceStatus}
                 </p>
               </div>
               <div className="sm:col-span-3">
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Módulo
                 </span>
-                <p className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">
+                <p className="mt-0.5 font-semibold text-[var(--text-primary)]">
                   {studentCard.linkedCurso}
                 </p>
               </div>
@@ -406,18 +433,18 @@ export const NpsInvitationDetailModal: React.FC<
           {/* Histórico de Pesquisas */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="typo-title-section flex items-center gap-1.5 text-slate-800 dark:text-slate-200">
-                <History className="h-4 w-4 text-[#004A8D] dark:text-sky-400" />
+              <h3 className="typo-title-section flex items-center gap-1.5 text-[var(--text-primary)]">
+                <History className="h-4 w-4 text-[var(--color-primary)]" />
                 Histórico de Pesquisas
               </h3>
-              <span className="typo-meta font-semibold text-slate-500 tabular-nums dark:text-slate-400">
+              <span className="typo-meta font-mono font-semibold text-[var(--text-secondary)] tabular-nums">
                 {chronologicalSurveys.length}
               </span>
             </div>
 
             <div
               data-testid="nps-chronological-history-list"
-              className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900"
+              className="surface-solid divide-y divide-[var(--border-color)] overflow-hidden rounded-xl border border-[var(--border-color)]"
             >
               {chronologicalSurveys.map((item, index) => {
                 const isSelected = item.id === activeInvitation.id;
@@ -437,11 +464,11 @@ export const NpsInvitationDetailModal: React.FC<
                     className={`flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left transition-colors cursor-pointer ${
                       isSelected
                         ? 'bg-purple-50/70 dark:bg-purple-950/40'
-                        : 'bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/70'
+                        : 'bg-[var(--surface-card)] hover:bg-slate-50 dark:hover:bg-slate-800/70'
                     }`}
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="typo-card-body flex flex-wrap items-center gap-1.5 font-semibold text-slate-900 tabular-nums dark:text-slate-100">
+                      <div className="typo-card-body flex flex-wrap items-center gap-1.5 font-semibold text-[var(--text-primary)] tabular-nums">
                         <span className="typo-badge font-bold text-slate-400">
                           {index + 1}º
                         </span>
@@ -453,14 +480,14 @@ export const NpsInvitationDetailModal: React.FC<
                         <span className="text-slate-300 dark:text-slate-600">·</span>
                         <span>{item.pontoJornada || 'Ciclo Regular'}</span>
                       </div>
-                      <div className="typo-meta mt-0.5 flex items-center gap-1.5 text-slate-500 tabular-nums dark:text-slate-400">
+                      <div className="typo-meta mt-0.5 flex items-center gap-1.5 text-[var(--text-secondary)] tabular-nums">
                         <Clock className="h-3 w-3 text-slate-400" />
                         <span>{formatBrasiliaDateTime(item.createdAt)}</span>
                       </div>
                     </div>
 
                     <span
-                      className={`typo-badge inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 ${
+                      className={`typo-badge inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 ${
                         itemAnswered
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
                           : itemExpired
@@ -485,12 +512,12 @@ export const NpsInvitationDetailModal: React.FC<
           {/* Detalhes da Pesquisa Selecionada */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="typo-title-section flex items-center gap-1.5 text-slate-800 dark:text-slate-200">
-                <FileText className="h-4 w-4 text-[#004A8D] dark:text-sky-400" />
+              <h3 className="typo-title-section flex items-center gap-1.5 text-[var(--text-primary)]">
+                <FileText className="h-4 w-4 text-[var(--color-primary)]" />
                 Detalhes da Pesquisa
               </h3>
               {isLatestActive && (
-                <span className="typo-badge inline-flex items-center gap-1 rounded border border-purple-200 bg-purple-50 px-2 py-0.5 text-purple-800 dark:border-purple-800 dark:bg-purple-950/60 dark:text-purple-300">
+                <span className="typo-badge inline-flex items-center gap-1 rounded-md border border-purple-200 bg-purple-50 px-2 py-0.5 text-purple-800 dark:border-purple-800 dark:bg-purple-950/60 dark:text-purple-300">
                   Atual
                 </span>
               )}
@@ -499,11 +526,11 @@ export const NpsInvitationDetailModal: React.FC<
             {activeInvitation.comentarioNps && (
               <div
                 data-testid="nps-modal-qualitative-comment"
-                className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-1"
+                className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-1 dark:border-emerald-800 dark:bg-emerald-950/40"
               >
-                <div className="flex items-center justify-between text-xs font-bold text-emerald-900">
+                <div className="flex items-center justify-between text-xs font-bold text-emerald-900 dark:text-emerald-200">
                   <span className="flex items-center gap-1.5">
-                    <MessageSquareQuote className="h-4 w-4 text-emerald-600" />
+                    <MessageSquareQuote className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                     Comentário
                   </span>
                   {typeof activeInvitation.notaNps === 'number' && (
@@ -512,19 +539,19 @@ export const NpsInvitationDetailModal: React.FC<
                     </span>
                   )}
                 </div>
-                <p className="text-xs italic text-slate-800 pt-1">
+                <p className="text-xs italic text-slate-800 dark:text-slate-200 pt-1">
                   "{activeInvitation.comentarioNps}"
                 </p>
               </div>
             )}
 
-            <div className="typo-card-body grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2 dark:border-slate-800 dark:bg-slate-800/50">
+            <div className="typo-card-body surface-solid grid grid-cols-1 gap-3 rounded-xl border border-[var(--border-color)] p-4 sm:grid-cols-2">
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Código Indecx
                 </span>
                 <div className="mt-0.5 flex items-center gap-2">
-                  <span className="inline-flex items-center gap-0.5 font-mono font-bold text-slate-900 tabular-nums dark:text-slate-100">
+                  <span className="inline-flex items-center gap-0.5 font-mono font-bold text-[var(--text-primary)] tabular-nums">
                     <Hash className="h-3 w-3 text-purple-600 dark:text-purple-400" />
                     {activeInvitation.controlId || 'Não informado'}
                   </span>
@@ -532,7 +559,7 @@ export const NpsInvitationDetailModal: React.FC<
                     <button
                       type="button"
                       onClick={() => handleCopy(activeInvitation.controlId)}
-                      className="typo-btn inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-600 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
+                      className="btn-press typo-btn inline-flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--surface-card)] px-1.5 py-0.5 text-[var(--text-secondary)] transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                     >
                       {copiedField === 'id' ? (
                         <Check className="h-2.5 w-2.5 text-emerald-600 dark:text-emerald-400" />
@@ -545,31 +572,31 @@ export const NpsInvitationDetailModal: React.FC<
               </div>
 
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Ciclo
                 </span>
-                <p className="mt-0.5 font-semibold text-slate-900 dark:text-slate-100">
+                <p className="mt-0.5 font-semibold text-[var(--text-primary)]">
                   {activeInvitation.pontoJornada || 'Ciclo Regular'}
                 </p>
               </div>
 
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Envio
                 </span>
-                <p className="mt-0.5 flex items-center gap-1 font-semibold text-slate-900 tabular-nums dark:text-slate-100">
+                <p className="mt-0.5 flex items-center gap-1 font-mono font-semibold text-[var(--text-primary)] tabular-nums">
                   <Calendar className="h-3 w-3 text-slate-400" />
                   <span>{formatBrasiliaDateTime(activeInvitation.createdAt)}</span>
                 </p>
               </div>
 
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Status de envio
                 </span>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
                   <span
-                    className={`typo-badge inline-flex items-center gap-1 rounded border px-2 py-0.5 font-semibold ${
+                    className={`typo-badge inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-semibold ${
                       activeInvitation.emailDeliveryStatus === 'Aberto'
                         ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
                         : activeInvitation.emailDeliveryStatus === 'Entregue'
@@ -586,11 +613,11 @@ export const NpsInvitationDetailModal: React.FC<
               </div>
 
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   E-mail
                 </span>
                 <p
-                  className="mt-0.5 break-all font-semibold text-slate-900 dark:text-slate-100"
+                  className="mt-0.5 break-all font-semibold text-[var(--text-primary)]"
                   data-testid="nps-modal-linked-email"
                 >
                   {activeInvitation.email || 'Não informado'}
@@ -598,10 +625,10 @@ export const NpsInvitationDetailModal: React.FC<
               </div>
 
               <div>
-                <span className="typo-meta text-slate-500 dark:text-slate-400">
+                <span className="typo-meta text-[var(--text-secondary)]">
                   Telefone
                 </span>
-                <p className="mt-0.5 flex items-center gap-1 font-semibold text-slate-900 tabular-nums dark:text-slate-100">
+                <p className="mt-0.5 flex items-center gap-1 font-mono font-semibold text-[var(--text-primary)] tabular-nums">
                   <Phone className="h-3 w-3 text-slate-400" />
                   <span>{activeInvitation.phone || 'Não informado'}</span>
                 </p>
@@ -611,16 +638,16 @@ export const NpsInvitationDetailModal: React.FC<
         </div>
 
         {/* Rodapé */}
-        <div className="flex shrink-0 items-center justify-end border-t border-slate-200 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex shrink-0 items-center justify-end border-t border-[var(--border-color)] bg-[var(--bg-secondary)]/80 px-5 py-3">
           <button
             type="button"
             onClick={onClose}
-            className="typo-btn rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+            className="btn-press typo-btn rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] px-4 py-1.5 text-[var(--text-primary)] transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
             Fechar
           </button>
         </div>
-      </div>
+      </motion.div>
 
       {showResendEmailModal && (
         <NpsResendEmailModal
@@ -651,10 +678,15 @@ export const NpsInvitationDetailModal: React.FC<
               type: 'success',
               message: res.message,
             });
+            toast({
+              type: 'success',
+              title: 'Convite NPS Reenviado',
+              message: res.message,
+            });
             setShowResendEmailModal(false);
           }}
         />
       )}
-    </div>
+    </motion.div>
   );
 };

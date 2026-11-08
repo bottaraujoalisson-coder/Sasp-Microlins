@@ -1,11 +1,54 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
-@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --bg-primary: #F5F7FB;
+  --bg-secondary: #EEF2F8;
+  --surface-card: #FFFFFF;
+  --surface-elevated: #FFFFFF;
+  --color-primary: #2563EB;
+  --color-secondary: #6366F1;
+  --text-primary: #172033;
+  --text-secondary: #64748B;
+  --border-color: #E2E8F0;
+  --status-success: #16A34A;
+  --status-warning: #F59E0B;
+  --status-error: #DC2626;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dark,
+[data-theme="dark"] {
+  --bg-primary: #0B1120;
+  --bg-secondary: #111827;
+  --surface-card: #172033;
+  --surface-elevated: #1E293B;
+  --color-primary: #60A5FA;
+  --color-secondary: #818CF8;
+  --text-primary: #F8FAFC;
+  --text-secondary: #A1AEC0;
+  --border-color: #334155;
+  --status-success: #16A34A;
+  --status-warning: #F59E0B;
+  --status-error: #DC2626;
+}
 
 @theme {
-  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-surface-card: var(--surface-card);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-brand-primary: var(--color-primary);
+  --color-brand-secondary: var(--color-secondary);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-border-token: var(--border-color);
+  --color-status-success: var(--status-success);
+  --color-status-warning: var(--status-warning);
+  --color-status-error: var(--status-error);
 }
 
 @layer base {
@@ -14,19 +57,22 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    line-height: 1.5;
   }
 
   body {
     margin: 0;
     padding: 0;
     overflow-x: hidden;
-    background-color: #f8fafc;
-    color: #0f172a;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    transition: background-color 240ms var(--ease-standard), color 240ms var(--ease-standard);
   }
 
-  .dark body {
-    background-color: #090d16;
-    color: #f8fafc;
+  .dark body,
+  [data-theme="dark"] body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
   }
 
   button,
@@ -41,90 +87,261 @@
   }
 
   :focus-visible {
-    outline: 2px solid #004A8D;
-    outline-offset: 1px;
-  }
-
-  .dark :focus-visible {
-    outline-color: #38bdf8;
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
   }
 }
 
 /* ============================================================================
-   SISTEMA TIPOGRÁFICO E DE COMPONENTES PADRONIZADO — MICROLINS
-   Hierarquia clara em 3 níveis:
-   1. Primário: Títulos e indicadores principais (alto contraste)
-   2. Secundário: Subtítulos, rótulos e dados de apoio
-   3. Auxiliar: Metadados, contadores e badges discretos
+   ESCALA TIPOGRÁFICA E HIERARQUIA GLOBAL PADRONIZADA — MICROLINS
+   Pesos estritamente entre 400 e 700 | Line-height entre 1.4 e 1.6
    ============================================================================ */
 
-/* 1. Título Principal (Cabeçalho do Sistema): 15px / Bold */
+/* 1. Títulos principais (H1 de páginas e dashboards): 28px a 36px */
 .typo-title-main {
-  font-size: 0.9375rem;
-  line-height: 1.25rem;
+  font-size: clamp(1.75rem, 2.1vw, 2.25rem);
+  line-height: 1.4;
   font-weight: 700;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
 }
 
-/* 2. Título de Seção / Modal / Métrica Principal: 14px / Bold */
+/* 2. Títulos de seções (H2 de módulos, modais e painéis): 20px a 24px */
 .typo-title-section {
-  font-size: 0.875rem;
-  line-height: 1.25rem;
+  font-size: clamp(1.25rem, 1.5vw, 1.5rem);
+  line-height: 1.4;
   font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+}
+
+/* 3. Subtítulos (Cabeçalhos de cards e colunas de Kanban): 16px a 18px */
+.typo-subtitle {
+  font-size: clamp(1rem, 1.1vw, 1.125rem);
+  line-height: 1.45;
+  font-weight: 600;
   letter-spacing: -0.01em;
 }
 
-/* 3. Subtítulos e Cabeçalhos de Colunas: 12px / SemiBold */
-.typo-subtitle {
-  font-size: 0.75rem;
-  line-height: 1rem;
-  font-weight: 600;
-}
-
-/* 4. Nome do Aluno no Card (Destaque Principal): 12.5px / Bold */
+/* 4. Nome do Aluno / Destaque de Card: 15px a 16px */
 .typo-card-title {
-  font-size: 0.78125rem;
-  line-height: 1.125rem;
-  font-weight: 700;
-  letter-spacing: -0.005em;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
-/* 5. Corpo do Card (Curso, Aula, Contato): 11.5px / Medium */
+/* 5. Textos comuns (Corpo de tabelas, dados de alunos e formulários): 14px a 16px */
 .typo-card-body {
-  font-size: 0.71875rem;
-  line-height: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
   font-weight: 500;
 }
 
-/* 6. Metadados e Rótulos Secundários: 11px / Medium */
+/* 6. Textos auxiliares (Metadados, timestamps, legendas): 12px a 13px */
 .typo-meta {
-  font-size: 0.6875rem;
-  line-height: 0.9375rem;
+  font-size: 0.78125rem;
+  line-height: 1.45;
   font-weight: 500;
 }
 
-/* 7. Badges e Indicadores Compactos: 10.5px / SemiBold */
+/* 7. Badges e Indicadores: 12px a 13px */
 .typo-badge {
-  font-size: 0.65625rem;
-  line-height: 0.875rem;
-  font-weight: 600;
-}
-
-/* 8. Botões e Ações Interativas: 11.5px / SemiBold */
-.typo-btn {
-  font-size: 0.71875rem;
-  line-height: 1rem;
-  font-weight: 600;
-}
-
-/* 9. Controles de Formulário e Filtros: 12px / Medium */
-.typo-control {
   font-size: 0.75rem;
-  line-height: 1rem;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+/* 8. Botões e Ações Interativas: 14px a 15px */
+.typo-btn {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+/* 9. Controles de Formulário e Filtros: 14px a 15px */
+.typo-control {
+  font-size: 0.875rem;
+  line-height: 1.4;
   font-weight: 500;
 }
 
-/* Barras de rolagem discretas e padronizadas */
+/* ============================================================================
+   EFEITO GLASSMORPHISM GLOBAL & SUPERFÍCIES SÓLIDAS DE ALTA LEGIBILIDADE
+   ============================================================================ */
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(226, 232, 240, 0.78);
+  border-radius: 1rem;
+  box-shadow: 0 8px 32px -4px rgba(15, 23, 42, 0.08);
+  transition: all 240ms var(--ease-standard);
+}
+
+.dark .glass-panel,
+[data-theme="dark"] .glass-panel {
+  background: rgba(23, 32, 51, 0.78);
+  border-color: rgba(51, 65, 85, 0.65);
+  box-shadow: 0 12px 36px -4px rgba(0, 0, 0, 0.45);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(226, 232, 240, 0.78);
+  border-radius: 0.875rem;
+  box-shadow: 0 8px 32px -4px rgba(15, 23, 42, 0.08);
+  transition: transform 240ms var(--ease-standard), box-shadow 240ms var(--ease-standard), border-color 240ms var(--ease-standard), background-color 240ms var(--ease-standard);
+}
+
+.dark .glass-card,
+[data-theme="dark"] .glass-card {
+  background: rgba(23, 32, 51, 0.80);
+  border-color: rgba(51, 65, 85, 0.65);
+  box-shadow: 0 12px 36px -4px rgba(0, 0, 0, 0.45);
+}
+
+.glass-modal {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  border-radius: 1.125rem;
+  box-shadow: 0 20px 48px -8px rgba(15, 23, 42, 0.16);
+  transition: all 240ms var(--ease-standard);
+}
+
+.dark .glass-modal,
+[data-theme="dark"] .glass-modal {
+  background: rgba(30, 41, 59, 0.90);
+  border-color: rgba(51, 65, 85, 0.75);
+  box-shadow: 0 24px 56px -8px rgba(0, 0, 0, 0.58);
+}
+
+.glass-sidebar {
+  background: rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-right: 1px solid rgba(226, 232, 240, 0.78);
+  box-shadow: 0 8px 32px -4px rgba(15, 23, 42, 0.06);
+  transition: width 260ms var(--ease-standard), transform 260ms var(--ease-standard), background-color 240ms var(--ease-standard);
+}
+
+.dark .glass-sidebar,
+[data-theme="dark"] .glass-sidebar {
+  background: rgba(23, 32, 51, 0.82);
+  border-right-color: rgba(51, 65, 85, 0.65);
+  box-shadow: 0 12px 36px -4px rgba(0, 0, 0, 0.45);
+}
+
+.glass-toast {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(226, 232, 240, 0.82);
+  border-radius: 0.875rem;
+  box-shadow: 0 12px 34px -6px rgba(15, 23, 42, 0.14);
+}
+
+.dark .glass-toast,
+[data-theme="dark"] .glass-toast {
+  background: rgba(30, 41, 59, 0.86);
+  border-color: rgba(51, 65, 85, 0.72);
+  box-shadow: 0 14px 38px -6px rgba(0, 0, 0, 0.52);
+}
+
+/* Regra de legibilidade em tabelas densas e formulários (>= 95% sólido) */
+.surface-solid {
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-color);
+  border-radius: 0.875rem;
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.05);
+}
+
+.dark .surface-solid,
+[data-theme="dark"] .surface-solid {
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.35);
+}
+
+/* ============================================================================
+   MICRO-INTERAÇÕES, HOVER ELEVATION & SHIMMER SKELETON
+   ============================================================================ */
+
+.hover-elevate {
+  transition: transform 220ms var(--ease-standard), box-shadow 220ms var(--ease-standard), border-color 220ms var(--ease-standard);
+}
+
+.hover-elevate:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 34px -6px rgba(37, 99, 235, 0.12), 0 8px 20px -6px rgba(15, 23, 42, 0.08);
+}
+
+.dark .hover-elevate:hover,
+[data-theme="dark"] .hover-elevate:hover {
+  box-shadow: 0 16px 38px -6px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(96, 165, 250, 0.28);
+}
+
+.btn-press {
+  transition: transform 150ms var(--ease-standard), box-shadow 200ms var(--ease-standard), background-color 200ms var(--ease-standard);
+}
+
+.btn-press:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+@keyframes shimmerWave {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(226, 232, 240, 0.55) 25%,
+    rgba(241, 245, 249, 0.95) 50%,
+    rgba(226, 232, 240, 0.55) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmerWave 1.6s infinite linear;
+  border-radius: 0.75rem;
+}
+
+.dark .shimmer-skeleton,
+[data-theme="dark"] .shimmer-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(30, 41, 59, 0.65) 25%,
+    rgba(51, 65, 85, 0.90) 50%,
+    rgba(30, 41, 59, 0.65) 75%
+  );
+  background-size: 200% 100%;
+}
+
+/* ============================================================================
+   ACESSIBILIDADE: REDUCED MOTION & BARRAS DE ROLAGEM
+   ============================================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .hover-elevate:hover {
+    transform: none !important;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -140,20 +357,36 @@
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.7);
+  background: rgba(100, 116, 139, 0.75);
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: rgba(71, 85, 105, 0.55);
+  background: rgba(71, 85, 105, 0.6);
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.8);
+  background: rgba(100, 116, 139, 0.85);
+}
+
+.sidebar-nav-item {
+  transition: transform 200ms var(--ease-standard), background-color 200ms var(--ease-standard), color 200ms var(--ease-standard), box-shadow 200ms var(--ease-standard);
 }
 
 @media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
   body {
     background: #ffffff !important;
-    color: #000000 !important;
+    color: #0f172a !important;
+  }
+  .no-print,
+  [data-testid="main-header"],
+  [data-testid="smart-sidebar"],
+  [data-testid="system-footer"],
+  [data-testid="filters-section"] {
+    display: none !important;
   }
 }
+

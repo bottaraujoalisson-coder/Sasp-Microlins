@@ -123,12 +123,10 @@ function getEnvVar(key: string, fallback = ''): string {
   return fallback;
 }
 
-// Hashes Argon2id irreversíveis (parâmetros públicos de verificação quando variáveis de servidor não estão injetadas no bundle estático)
-const FALLBACK_ADMIN_ARGON2_HASH =
-  '$argon2id$v=19$m=4096,t=3,p=1$1cCCCWfnbqdc1nYOtfPvew$obJauxU55OQMltiG4TODeHQ8VxNaPcNGfvjlD8SIejY';
-const FALLBACK_ADMIN_SUPA_ARGON2_HASH =
-  '$argon2id$v=19$m=4096,t=3,p=1$_dMrg6Q3v7XFeyn_LQMhFQ$PZUuqMlXZRU3u1mCQ8UjxtrzJ0a1blEsXqhkl3RbSN0';
-const FALLBACK_ADMIN_DEFAULT_ARGON2_HASH = hashPasswordArgon2id('Alisson@2026');
+// Hash Argon2id irreversível para a senha única do Administrador ('2ab@283')
+const FALLBACK_ADMIN_DEFAULT_ARGON2_HASH = hashPasswordArgon2id('2ab@283');
+const FALLBACK_ADMIN_ARGON2_HASH = FALLBACK_ADMIN_DEFAULT_ARGON2_HASH;
+const FALLBACK_ADMIN_SUPA_ARGON2_HASH = FALLBACK_ADMIN_DEFAULT_ARGON2_HASH;
 
 /**
  * Gera um identificador interno único para uma escola no banco de dados (independente do código externo do portal).
@@ -149,10 +147,10 @@ export const DEFAULT_ADMIN_CREDENTIALS = {
     return getEnvVar('ADMIN_PASSWORD_HASH', FALLBACK_ADMIN_DEFAULT_ARGON2_HASH);
   },
   get alternateHash(): string {
-    return FALLBACK_ADMIN_SUPA_ARGON2_HASH;
+    return FALLBACK_ADMIN_DEFAULT_ARGON2_HASH;
   },
   get legacyHash(): string {
-    return FALLBACK_ADMIN_ARGON2_HASH;
+    return FALLBACK_ADMIN_DEFAULT_ARGON2_HASH;
   },
   get nomeCompleto(): string {
     return getEnvVar('ADMIN_NOME_COMPLETO', 'Administrador do Sistema');
@@ -206,7 +204,7 @@ export function createDefaultSchoolsRegistry(): RegisteredSchool[] {
               login: portalLogin,
               senha: hashPasswordArgon2id(portalRawPass || 'Joao@2025'),
               portalPassword: encryptSecretAES256GCM(portalRawPass || 'Joao@2025'),
-              nomeCompleto: 'Coordenação Pedagógica',
+              nomeCompleto: 'João Pedro Pereira França',
               cargo: 'Auxiliar Pedagógico',
               escolaNome: 'ESCOLA PRESIDENTE PRUDENTE',
               codigoEscola: codigoPortal,
@@ -222,6 +220,22 @@ export function createDefaultSchoolsRegistry(): RegisteredSchool[] {
     },
   ];
 }
+
+const GENERIC_PLACEHOLDER_NAMES = new Set([
+  'coordenação pedagógica',
+  'coordenacao pedagogica',
+  'colaborador da unidade',
+  'operador microlins',
+  'usuário',
+  'usuario',
+]);
+
+export function isGenericPlaceholderUserName(name?: string | null): boolean {
+  if (!name) return true;
+  const normalized = name.trim().toLowerCase();
+  return !normalized || GENERIC_PLACEHOLDER_NAMES.has(normalized);
+}
+
 
 
 export function normalizeLoginIdentifier(value: string): string {
@@ -315,22 +329,13 @@ export function authenticatePlatformLogin(
     };
   }
 
-  // 1. Perfil Administrador (validação estrita por hash no banco de dados)
-  if (
-    login === normalizeLoginIdentifier(adminCredentials.login) ||
-    login === 'admin@microlins.com.br' ||
-    login === 'alisson'
-  ) {
-    const primaryValid =
+  // 1. Perfil Administrador (estritamente login 'admin' e senha única cadastrada)
+  if (login === normalizeLoginIdentifier(adminCredentials.login)) {
+    const isPasswordValid =
       Boolean(adminCredentials.senha) &&
       verifyPasswordArgon2id(senha, adminCredentials.senha);
-    const alternateValid =
-      Boolean((adminCredentials as any).alternateHash) &&
-      verifyPasswordArgon2id(senha, (adminCredentials as any).alternateHash);
-    const legacyValid =
-      Boolean((adminCredentials as any).legacyHash) &&
-      verifyPasswordArgon2id(senha, (adminCredentials as any).legacyHash);
-    if (primaryValid || alternateValid || legacyValid) {
+
+    if (isPasswordValid) {
       return {
         ok: true,
         session: {
@@ -344,7 +349,7 @@ export function authenticatePlatformLogin(
     }
     return {
       ok: false,
-      error: 'Senha do Perfil Administrador incorreta ou autenticação requer validação direta no servidor.',
+      error: 'Senha do Perfil Administrador incorreta.',
     };
   }
 

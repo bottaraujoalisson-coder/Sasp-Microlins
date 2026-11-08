@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { motion } from 'motion/react';
 import {
   Check,
   Copy,
@@ -19,6 +20,7 @@ import {
   generateCsvContent,
   generateWhatsAppSummary,
 } from '../utils/performanceAnalytics';
+import { useToast } from './uiSystem';
 
 interface ExportStudioModalProps {
   isOpen: boolean;
@@ -40,6 +42,7 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
   notesByContract,
   onTriggerPrint,
 }) => {
+  const { toast } = useToast();
   const [scope, setScope] = useState<ExportScope>('FILTERED');
   const [activeTab, setActiveTab] = useState<ExportTab>('CSV');
   const [delimiter, setDelimiter] = useState<';' | ','>(';');
@@ -156,6 +159,11 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
       document.body.removeChild(textarea);
     }
     setCopiedLabel(label);
+    toast({
+      type: 'success',
+      title: label,
+      message: `${targetRecords.length} registros copiados para a área de transferência.`,
+    });
     setTimeout(() => setCopiedLabel(null), 2500);
   };
 
@@ -171,24 +179,41 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     setDownloadedLabel(label);
+    toast({
+      type: 'success',
+      title: label,
+      message: `Arquivo ${filename} exportado com sucesso.`,
+    });
     setTimeout(() => setDownloadedLabel(null), 2500);
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs"
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-xs"
       role="dialog"
       aria-modal="true"
       aria-labelledby="export-studio-title"
+      onClick={onClose}
     >
-      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 12 }}
+        transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
+        onClick={(e) => e.stopPropagation()}
+        className="glass-modal flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--surface-elevated)] shadow-2xl"
+      >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-[var(--border-color)] px-6 py-4">
           <div>
-            <h2 id="export-studio-title" className="text-lg font-bold text-slate-900">
+            <h2 id="export-studio-title" className="typo-title-section text-[var(--text-primary)]">
               Central de Exportação Rápida e Organizada
             </h2>
-            <p className="text-xs text-slate-500">
+            <p className="typo-meta text-[var(--text-secondary)]">
               {PORTAL_METADATA.unidade} · Login {PORTAL_METADATA.usuarioLogin} · Dados estruturados prontos para Excel, Google Sheets, PDF e WhatsApp
             </p>
           </div>
@@ -196,19 +221,19 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Fechar central de exportação"
-            className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+            className="btn-press rounded-xl p-2 text-[var(--text-secondary)] transition-colors hover:bg-slate-100 hover:text-[var(--text-primary)] dark:hover:bg-slate-800 cursor-pointer"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="grid flex-1 grid-cols-1 divide-y divide-slate-200 overflow-y-auto lg:grid-cols-12 lg:divide-x lg:divide-y-0">
+        <div className="grid flex-1 grid-cols-1 divide-y divide-[var(--border-color)] overflow-y-auto lg:grid-cols-12 lg:divide-x lg:divide-y-0">
           {/* Left Configuration Column */}
           <div className="space-y-6 p-6 lg:col-span-5">
             {/* Step 1: Recorte de Dados */}
             <div>
-              <label className="block text-xs font-semibold text-slate-900">
+              <label className="block text-xs font-semibold text-[var(--text-primary)]">
                 01. Recorte de Alunos para Exportação
               </label>
               <div className="mt-2 grid grid-cols-1 gap-1.5">
@@ -250,14 +275,14 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
                     key={opt.id}
                     type="button"
                     onClick={() => setScope(opt.id)}
-                    className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left text-xs font-medium transition-colors ${
+                    className={`btn-press flex items-center justify-between rounded-xl border px-3 py-2 text-left text-xs font-medium transition-colors cursor-pointer ${
                       scope === opt.id
-                        ? 'border-blue-600 bg-blue-50/70 text-blue-950'
-                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        ? 'border-[var(--color-primary)] bg-blue-50/70 text-blue-950 dark:bg-blue-950/50 dark:text-blue-200'
+                        : 'border-[var(--border-color)] bg-[var(--surface-card)] text-[var(--text-primary)] hover:bg-slate-50 dark:hover:bg-slate-800/70'
                     }`}
                   >
                     <span className="truncate">{opt.label}</span>
-                    <span className="font-mono font-semibold text-slate-600 tabular-nums">
+                    <span className="font-mono font-semibold text-[var(--text-secondary)] tabular-nums">
                       {opt.count}
                     </span>
                   </button>
@@ -270,7 +295,7 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
               <div>
                 <label
                   htmlFor="export-sort-select"
-                  className="block text-xs font-semibold text-slate-900"
+                  className="block text-xs font-semibold text-[var(--text-primary)]"
                 >
                   02. Ordenar Linhas Por
                 </label>
@@ -278,7 +303,7 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
                   id="export-sort-select"
                   value={sortOrder}
                   onChange={(e) => setSortOrder(e.target.value as typeof sortOrder)}
-                  className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs text-slate-800 focus:border-blue-600 focus:outline-none"
+                  className="surface-solid mt-1.5 w-full rounded-xl border border-[var(--border-color)] px-2.5 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--color-primary)] focus:outline-none"
                 >
                   <option value="horario">Horário de Aula</option>
                   <option value="nome">Nome do Aluno (A-Z)</option>
@@ -289,7 +314,7 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
               <div>
                 <label
                   htmlFor="export-delimiter-select"
-                  className="block text-xs font-semibold text-slate-900"
+                  className="block text-xs font-semibold text-[var(--text-primary)]"
                 >
                   Separador CSV
                 </label>
@@ -297,7 +322,7 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
                   id="export-delimiter-select"
                   value={delimiter}
                   onChange={(e) => setDelimiter(e.target.value as ';' | ',')}
-                  className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs text-slate-800 focus:border-blue-600 focus:outline-none"
+                  className="surface-solid mt-1.5 w-full rounded-xl border border-[var(--border-color)] px-2.5 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--color-primary)] focus:outline-none"
                 >
                   <option value=";">Ponto e vírgula (;) — Excel BR</option>
                   <option value=",">Vírgula (,) — Padrão Global</option>
@@ -308,18 +333,18 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
             {/* Step 3: Seleção de Colunas */}
             <div>
               <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-slate-900">
+                <label className="text-xs font-semibold text-[var(--text-primary)]">
                   03. Colunas Incluídas ({selectedColumns.length}/{EXPORT_COLUMNS.length})
                 </label>
                 <div className="flex items-center gap-2 text-xs">
                   <button
                     type="button"
                     onClick={() => setSelectedColumns(EXPORT_COLUMNS.map((c) => c.key))}
-                    className="font-medium text-blue-700 hover:underline"
+                    className="font-medium text-[var(--color-primary)] hover:underline cursor-pointer"
                   >
                     Todas
                   </button>
-                  <span className="text-slate-300">·</span>
+                  <span className="text-slate-300 dark:text-slate-700">·</span>
                   <button
                     type="button"
                     onClick={() =>
@@ -327,20 +352,20 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
                         EXPORT_COLUMNS.filter((c) => c.defaultEnabled).map((c) => c.key)
                       )
                     }
-                    className="font-medium text-slate-600 hover:underline"
+                    className="font-medium text-[var(--text-secondary)] hover:underline cursor-pointer"
                   >
                     Essenciais
                   </button>
                 </div>
               </div>
 
-              <div className="mt-2 grid max-h-48 grid-cols-2 gap-1.5 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
+              <div className="mt-2 grid max-h-48 grid-cols-2 gap-1.5 overflow-y-auto rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]/60 p-2.5">
                 {EXPORT_COLUMNS.map((col) => {
                   const checked = selectedColumns.includes(col.key);
                   return (
                     <label
                       key={col.key}
-                      className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs text-slate-700 select-none hover:bg-white"
+                      className="flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1 text-xs text-[var(--text-primary)] select-none hover:bg-[var(--surface-card)]"
                     >
                       <input
                         type="checkbox"
@@ -360,15 +385,15 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
           <div className="flex flex-col justify-between p-6 lg:col-span-7">
             <div className="space-y-4">
               {/* Format Tabs */}
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
-                <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-color)] pb-3">
+                <div className="flex items-center gap-1 rounded-xl bg-[var(--bg-secondary)] p-1">
                   <button
                     type="button"
                     onClick={() => setActiveTab('CSV')}
-                    className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
+                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
                       activeTab === 'CSV'
-                        ? 'bg-white text-slate-900 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
+                        ? 'bg-[var(--surface-card)] text-[var(--text-primary)] shadow-xs'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     <FileSpreadsheet className="h-3.5 w-3.5" />
@@ -377,10 +402,10 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setActiveTab('WHATSAPP')}
-                    className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
+                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
                       activeTab === 'WHATSAPP'
-                        ? 'bg-white text-slate-900 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
+                        ? 'bg-[var(--surface-card)] text-[var(--text-primary)] shadow-xs'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     <MessageSquare className="h-3.5 w-3.5" />
@@ -389,10 +414,10 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setActiveTab('JSON')}
-                    className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
+                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
                       activeTab === 'JSON'
-                        ? 'bg-white text-slate-900 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
+                        ? 'bg-[var(--surface-card)] text-[var(--text-primary)] shadow-xs'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -400,13 +425,13 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
                   </button>
                 </div>
 
-                <div className="text-xs text-slate-500 font-mono tabular-nums">
+                <div className="text-xs text-[var(--text-secondary)] font-mono tabular-nums">
                   {targetRecords.length} registros · Média {kpis.mediaGeralNotas.toFixed(2)}
                 </div>
               </div>
 
               {/* Preview Box */}
-              <div className="rounded-lg border border-slate-200 bg-slate-950 p-4 text-slate-100">
+              <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-slate-100">
                 <div className="mb-2 flex items-center justify-between text-xs text-slate-400">
                   <span>
                     {activeTab === 'CSV' &&
@@ -427,7 +452,7 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
                         activeTab === 'CSV' ? 'Tabela copiada' : 'Texto copiado'
                       )
                     }
-                    className="flex items-center gap-1 text-xs font-medium text-blue-400 hover:text-blue-300"
+                    className="flex items-center gap-1 text-xs font-medium text-blue-400 hover:text-blue-300 cursor-pointer"
                   >
                     {copiedLabel ? (
                       <>
@@ -454,28 +479,28 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
               </div>
 
               {/* Quick Summary Metrics of Export */}
-              <div className="grid grid-cols-4 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+              <div className="grid grid-cols-4 gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]/70 p-3 text-xs">
                 <div>
-                  <span className="text-slate-500">Total Selecionado</span>
-                  <p className="mt-0.5 font-mono text-sm font-bold text-slate-900 tabular-nums">
+                  <span className="text-[var(--text-secondary)]">Total Selecionado</span>
+                  <p className="mt-0.5 font-mono text-sm font-bold text-[var(--text-primary)] tabular-nums">
                     {kpis.total} alunos
                   </p>
                 </div>
                 <div>
-                  <span className="text-slate-500">Finalizados</span>
-                  <p className="mt-0.5 font-mono text-sm font-bold text-emerald-700 tabular-nums">
+                  <span className="text-[var(--text-secondary)]">Finalizados</span>
+                  <p className="mt-0.5 font-mono text-sm font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
                     {kpis.finalizados} ({kpis.taxaConclusao}%)
                   </p>
                 </div>
                 <div>
-                  <span className="text-slate-500">Não Iniciados</span>
-                  <p className="mt-0.5 font-mono text-sm font-bold text-amber-700 tabular-nums">
+                  <span className="text-[var(--text-secondary)]">Não Iniciados</span>
+                  <p className="mt-0.5 font-mono text-sm font-bold text-amber-700 dark:text-amber-400 tabular-nums">
                     {kpis.naoIniciados}
                   </p>
                 </div>
                 <div>
-                  <span className="text-slate-500">Média de Notas</span>
-                  <p className="mt-0.5 font-mono text-sm font-bold text-blue-700 tabular-nums">
+                  <span className="text-[var(--text-secondary)]">Média de Notas</span>
+                  <p className="mt-0.5 font-mono text-sm font-bold text-[var(--color-primary)] tabular-nums">
                     {kpis.mediaGeralNotas.toFixed(2)}
                   </p>
                 </div>
@@ -483,7 +508,7 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
             </div>
 
             {/* Primary Export Action Buttons */}
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-color)] pt-4">
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -491,17 +516,17 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
                     onClose();
                     setTimeout(() => onTriggerPrint(), 100);
                   }}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 whitespace-nowrap shrink-0"
+                  className="btn-press inline-flex items-center gap-2 rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] px-3.5 py-2 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 cursor-pointer"
                 >
-                  <Printer className="h-4 w-4 text-slate-600" />
+                  <Printer className="h-4 w-4 text-[var(--text-secondary)]" />
                   Imprimir / Salvar PDF
                 </button>
                 <button
                   type="button"
                   onClick={() => handleCopy(whatsappSummary, 'Resumo WhatsApp copiado!')}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 whitespace-nowrap shrink-0"
+                  className="btn-press inline-flex items-center gap-2 rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] px-3.5 py-2 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 cursor-pointer"
                 >
-                  <MessageSquare className="h-4 w-4 text-emerald-600" />
+                  <MessageSquare className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                   Copiar Resumo WhatsApp
                 </button>
               </div>
@@ -517,9 +542,9 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
                       'JSON baixado!'
                     )
                   }
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 whitespace-nowrap shrink-0"
+                  className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] px-3.5 py-2 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 cursor-pointer"
                 >
-                  <FileText className="h-4 w-4 text-slate-600" />
+                  <FileText className="h-4 w-4 text-[var(--text-secondary)]" />
                   Baixar JSON
                 </button>
 
@@ -533,7 +558,7 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
                       'Planilha CSV baixada!'
                     )
                   }
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-blue-700 whitespace-nowrap shrink-0"
+                  className="btn-press inline-flex items-center gap-2 rounded-xl bg-[var(--color-primary)] px-4 py-2 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-blue-700 whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <Download className="h-4 w-4" />
                   {downloadedLabel || 'Baixar Planilha Excel (.CSV)'}
@@ -542,7 +567,7 @@ export const ExportStudioModal: React.FC<ExportStudioModalProps> = ({
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 };
